@@ -31,6 +31,8 @@ Choose extra evidence when the transcript is not enough:
 - Neither available? Say so in one line and offer the two options: `brew install uv` for private local transcription, or a free key from https://aistudio.google.com/apikey saved in `~/.skillforge/.env` as `GEMINI_API_KEY=...`. Never print a key or put one in a command.
 - Private or age-restricted source: `--cookies-from-browser firefox` (or chrome, safari). Only when the user says they have access.
 
+For a non-English source without captions, add `--frames` to `--engine local` so on-screen labels can be checked against the speech.
+
 If `ingest.py` reports a missing tool (`yt-dlp`, `ffmpeg`), give the one-line install command for the user's OS and stop.
 
 ### 2. Study
@@ -51,10 +53,12 @@ A skill is a reusable procedure Claude can apply later. Say yes only when ALL ho
 - The procedure is specific enough to act on (tools, settings, commands, decisions), not motivation or opinion.
 - It is not already covered well by an existing forged skill (check `python3 scripts/forge.py --list`; if a close slug exists, read it with `--show SLUG` and plan a merge instead of a duplicate).
 - The user would plausibly do this more than once.
+- It gives Claude something it would not already do well from general knowledge: product- or version-specific menu paths and settings, non-obvious pitfalls, decisions, house conventions. A well-made tutorial on a generic, well-documented basic (a Python venv, an Excel dropdown, `git commit`) is a note, not a skill.
+- The evidence actually shows the critical step. If the key moment is missing (no transcript and no frame of the code being typed, an unreadable screen), file a note that says what to re-ingest with (`--frames`, `--resolution 1280`, `--engine gemini`) instead of reconstructing the step from your own knowledge.
 
 Say no for: vlogs, news, opinion pieces, product reviews without a method, entertainment, interviews with no procedure, content too shallow to reproduce. A "no" is a good outcome; file a learning note with the real takeaways and move on. Do not inflate thin content into a skill.
 
-Give a confidence 0.0–1.0. Below 0.5 and skill-worthy, tell the user why you are unsure before writing anything.
+Give a confidence 0.0–1.0. Below 0.5 and skill-worthy, tell the user why you are unsure before writing anything. If the source shows a different product version from the one the user runs, say so in `prerequisites`, lower the confidence, and do not reject for that alone.
 
 ### 4. Distill
 
@@ -62,8 +66,9 @@ Write `distilled.json` into `work_dir` following `references/distill-schema.md`.
 
 - `slug` lowercase-hyphenated, named for the *task*, not the video (`ERP-studio-automated-action`, not `great-ERP-tutorial`).
 - `description` is what triggers the skill later: lead with the task, then 2–3 phrasings a user would say.
-- Every procedure step with a `timestamp` so the user can verify against the source.
-- Commands go in `commands` exactly as shown. Never write them into executable scripts; forge.py puts them in `references/commands.md`.
+- Every procedure step with a `timestamp` taken from a transcript cue (not a chapter marker) so the user can verify against the source. Put timestamps inline in pitfalls and verification too.
+- Non-English source: write the skill in English, but keep on-screen UI labels in the source language with the English equivalent in parentheses, because that is what the user will click. If labels came only from speech (no frames), say so under `contestable`.
+- Commands go in `commands` exactly as shown. A command that is only spoken, never shown, may go in with `(spoken, not shown)` in its description; never complete or "fix" a command from your own knowledge. Never write commands into executable scripts; forge.py puts them in `references/commands.md`.
 - Merging: if the slug exists, load the stored JSON with `--show`, and produce a merged `distilled.json` that keeps everything still valid from the old version, integrates the new source, and lists disagreements under `contestable` with both timestamps. Never silently overwrite a step with a contradicting one.
 - `apply_to_me`: 2–4 concrete things worth trying given what you know about the user's work. Skip if you know nothing.
 
@@ -84,6 +89,8 @@ Skills land in `~/.claude/skills/<slug>/` and are live in the next session. Note
 Finish with two or three sentences: verdict, where it went, and one thing worth trying this week. Do not recap the steps.
 
 ## Playlists and batches
+
+In a batch, write (forge) the first source on a task before distilling the next one, so the merge starts from the stored version via `--show`; a dry-run cannot show a merge into a skill that does not exist yet.
 
 For a playlist or channel URL, `ingest.py` does not fetch any captions: it prints `{"playlist": ..., "count": N, "entries": [{id, title, duration, url}]}`. Tell the user the count and pick the entries that match what they want (all of them only if they ask; otherwise the ones whose titles promise a procedure). Then ingest each entry URL in turn, judge each one, and prefer merging into one skill per task over one skill per video. Give a one-line verdict per video and one combined dry-run at the end.
 
