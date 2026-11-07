@@ -19,6 +19,8 @@ python3 scripts/ingest.py "<url or file>"
 
 This fetches metadata and native captions (no download needed for most YouTube videos). It prints a JSON summary with `work_dir`, `transcript_md` and an `errors` list. Read `transcript.md`.
 
+Check that the transcript is in the language actually spoken: YouTube's metadata language is often wrong. Ingest prefers the original speech-recognised track over a machine translation and lets Whisper detect the language unless you pass `--lang`.
+
 Long transcripts (podcasts, talks over an hour) can run to hundreds of KB. Never judge from a sample. Read the file in parts with your file tool's offset/limit, keeping running notes of claims and procedure per part, then judge from the notes. For a 2-hour episode this is 4 to 6 reads; that is the job.
 
 If `errors` is non-empty, say what failed in one line and continue with whatever evidence arrived (frames survive a transcription failure). Check `transcript_provenance`: when YouTube rate-limits captions (HTTP 429) ingest falls back to local Whisper by itself, so the transcript may be `local-whisper` rather than `manual`/`auto`; that is fine. Do not retry the same engine; offer the other one.
@@ -45,6 +47,8 @@ Read all evidence. Build a mental model of what the source actually teaches: not
 - **warnings and corrections** the speaker makes,
 - **what is contestable or unverified**.
 
+Facts that only appear in the description or metadata (credits, prices in a pinned comment) go in without a timestamp; say where they came from.
+
 ### 3. Judge: is this skill-worthy?
 
 A skill is a reusable procedure Claude can apply later. Say yes only when ALL hold:
@@ -56,7 +60,7 @@ A skill is a reusable procedure Claude can apply later. Say yes only when ALL ho
 - It gives Claude something it would not already do well from general knowledge: product- or version-specific menu paths and settings, non-obvious pitfalls, decisions, house conventions, concrete numbers and checks. A well-made tutorial on a generic, well-documented basic (a Python venv, an Excel dropdown, `git commit`, a basic recipe) is a note, not a skill. Exception: a well-known method that is central to the user's own work (as far as you know it) becomes a skill when the source turns it into a ready-to-run playbook with inputs, ordered steps and checks, because the skill then saves re-explaining it every time. Textbook knowledge of the method alone is not a reason to say no in that case.
 - The evidence actually shows the critical step. If the key moment is missing (no transcript and no frame of the code being typed, an unreadable screen), file a note that says what to re-ingest with (`--frames`, `--resolution 1280`, `--engine gemini`) instead of reconstructing the step from your own knowledge.
 
-Say no for: vlogs, news, opinion pieces, product reviews without a method, entertainment, interviews with no procedure, content too shallow to reproduce. A "no" is a good outcome; file a learning note with the real takeaways and move on. Do not inflate thin content into a skill.
+Say no for: vlogs, news, opinion pieces, product reviews without a method, entertainment, interviews with no procedure, content too shallow to reproduce. A "no" is a good outcome; file a learning note with the real takeaways and move on. Do not inflate thin content into a skill. For pure entertainment (music, comedy, vlogs) keep the note to the verdict and a two-sentence summary; for a long interview, 10–30 timestamped claims is the useful range.
 
 Give a confidence 0.0–1.0. Below 0.5 and skill-worthy, tell the user why you are unsure before writing anything. If the source shows a different product version from the one the user runs, say so in `prerequisites`, lower the confidence, and do not reject for that alone.
 
