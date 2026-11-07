@@ -85,10 +85,11 @@ def render_skill_md(d: dict) -> str:
     if d.get("decision_points"):
         out.append("## Decision points")
         for dp in d["decision_points"]:
-            out.append(f"- **{dp['when']}** → {dp['then']}")
+            out.append(f"- **{dp['when']}** → {dp['then']}{cite(dp, labels, len(d['sources']) > 1)}")
         out.append("")
     if d.get("pitfalls"):
-        out += ["## Pitfalls", *[f"- {p}" for p in d["pitfalls"]], ""]
+        out += ["## Pitfalls", *[f"- {item_text(p)}{cite(p, labels, len(d['sources']) > 1) if isinstance(p, dict) else ''}"
+                                 for p in d["pitfalls"]], ""]
     if d.get("verification"):
         out += ["## How to verify it worked", *[f"- {v}" for v in d["verification"]], ""]
     if d.get("commands"):
@@ -125,21 +126,52 @@ def cite(step: dict, labels: dict, multi: bool) -> str:
     return f" _({'; '.join(parts)})_" if parts else ""
 
 
-def attribute_steps(procedure: list[dict], old: dict | None, new_src: dict) -> list[dict]:
-    """Give every step a `source` once a skill has several: a step carried over unchanged from the stored
-    version keeps (or inherits) the old source, anything else came from the source being merged in now."""
+TRAILING_STAMP = re.compile(r"\s*\((?:S\d+\s+)?(\d{1,2}:\d{2}(?::\d{2})?)\)\.?\s*$")
+
+
+def as_pitfall(p) -> dict:
+    """Pitfalls may be plain strings; a trailing '(1:30)' becomes the timestamp so it can carry a source label."""
+    if isinstance(p, dict):
+        return p
+    m = TRAILING_STAMP.search(p)
+    return {"text": p[: m.start()].rstrip() + ("." if p[: m.start()].rstrip()[-1:] not in ".!?" else ""), "timestamp": m.group(1)} \
+        if m else {"text": p}
+
+
+def item_text(p) -> str:
+    return p if isinstance(p, str) else p.get("text", "")
+
+
+def attribute(items: list, old_items: list, key, old: dict | None, new_src: dict) -> list:
+    """Give every item a `source` once a skill has several sources. An item carried over unchanged from the stored
+    version keeps the source it had (or the only old source); anything new comes from the source being merged in."""
     old_sources = (old or {}).get("sources", [])
     if not old_sources:
-        return procedure
+        return items
     sole_old = (old_sources[0].get("id") or old_sources[0]["url"]) if len(old_sources) == 1 else None
-    known = {s["step"]: s.get("source") or sole_old for s in (old or {}).get("procedure", [])}
+    known = {key(i): (i.get("source") if isinstance(i, dict) else None) or sole_old for i in old_items}
     new_id = new_src.get("id") or new_src["url"]
     out = []
-    for step in procedure:
-        if not step.get("source") and not step.get("refs"):
-            step = {**step, "source": known.get(step["step"]) or new_id}
-        out.append(step)
+    for item in items:
+        if not item.get("source") and not item.get("refs"):
+            k = key(item)
+            src = known[k] if k in known else new_id     # a stored item with no known source stays unattributed
+            item = {**item, "source": src} if src else item
+        out.append(item)
     return out
+
+
+def attribute_steps(procedure: list[dict], old: dict | None, new_src: dict) -> list[dict]:
+    return attribute(procedure, (old or {}).get("procedure", []), lambda s: s["step"], old, new_src)
+
+
+def attribute_pitfalls(pitfalls: list, old: dict | None, new_src: dict) -> list[dict]:
+    old_items = [as_pitfall(p) for p in (old or {}).get("pitfalls", [])]
+    return attribute([as_pitfall(p) for p in pitfalls], old_items, lambda p: p["text"], old, new_src)
+
+
+def attribute_decisions(decisions: list[dict], old: dict | None, new_src: dict) -> list[dict]:
+    return attribute(decisions, (old or {}).get("decision_points", []), lambda dp: dp["when"], old, new_src)
 
 
 def source_frames(work_dir: Path | None, useless: set) -> tuple[list[dict], int]:
@@ -199,7 +231,8 @@ def render_note(d: dict, src: dict) -> str:
         out += ["## Steps shown (not forged as a skill)",
                 *[f"{i}. {st['step']}" + (f" ({st['timestamp']})" if st.get("timestamp") else "") for i, st in enumerate(d["procedure"], 1)], ""]
     if d.get("pitfalls"):
-        out += ["## Pitfalls", *[f"- {p}" for p in d["pitfalls"]], ""]
+        out += ["## Pitfalls", *[f"- {item_text(p)}" + (f" ({p['timestamp']})" if isinstance(p, dict) and p.get("timestamp") else "")
+                                 for p in d["pitfalls"]], ""]
     if d.get("verification"):
         out += ["## How to check", *[f"- {v}" for v in d["verification"]], ""]
     if d.get("commands"):
@@ -299,8 +332,10 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     if lost and not allow_drop:
         die(f"this would drop {len(lost)} step(s) that other sources of '{slug}' back: {lost[:5]}. "
             f"Load the stored version with --show {slug} and merge into it, or pass --allow-drop if removing them is intended.")
-    if len(sources) > 1 and content.get("procedure"):
-        content["procedure"] = attribute_steps(content["procedure"], existing, src)
+    if len(sources) > 1:
+        for field, fn in (("procedure", attribute_steps), ("pitfalls", attribute_pitfalls), ("decision_points", attribute_decisions)):
+            if content.get(field):
+                content[field] = fn(content[field], existing, src)
     old_content = {k: v for k, v in (existing or {}).items() if k not in ("sources", "forged_at", "version")}
     changed = existing is None or new_source or content != old_content
     merged = {**content, "sources": sources,

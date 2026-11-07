@@ -56,6 +56,9 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
 - `procedure[].refs` (optional, merges): a step shown in more than one source lists each one,
   `"refs": [{"source": "<id>", "timestamp": "0:43"}, {"source": "<other id>", "timestamp": "0:38"}]`, rendered `(S1 0:43; S2 0:38)`.
   Use it instead of writing source names into `timestamp`.
+- `pitfalls[]` may be a string or `{"text", "timestamp", "source" | "refs"}`; `decision_points[]` may carry `timestamp`, `source` or
+  `refs` too. In a merged skill forge.py attributes them like steps (a trailing `(1:30)` in a string pitfall becomes its timestamp)
+  and renders `(S2 1:20)`. Name the symptom the user will see in each pitfall.
 - `useless_frames` (optional): indexes (the `NNN` in `NNN_H-MM-SS.jpg`) of frames that carry nothing: blank, loading screens,
   talking head only, intro/outro cards, near-duplicates. forge.py copies every other frame of this source into
   `references/frames/<source id>/` and links them from that source's notes. Recorded per source; it never changes the skill's content.

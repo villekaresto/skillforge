@@ -508,3 +508,29 @@ def test_useless_frames_are_left_out_of_references(tmp_path, monkeypatch):
     r = run_forge([str(work / "distilled.json")], env)
     assert json.loads(r.stdout)["written"] == "unchanged"
     assert [p.name for p in (refs / "frames" / "abc").iterdir()] == ["003_0-30.jpg"]
+
+
+def test_merged_pitfalls_and_decisions_cite_their_source(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    first = distilled()
+    first["pitfalls"] = ["Watch out for the old trap (0:15)"]
+    first["decision_points"] = [{"when": "Small job", "then": "do it by hand"}]
+    f.write_text(json.dumps(first))
+    assert run_forge([str(f)], env).returncode == 0
+    md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
+    assert "- Watch out for the old trap (0:15)" in md, "single-source skills render pitfalls unchanged"
+
+    second = distilled(url="https://example.com/v/def")
+    second["source"]["id"] = "def"
+    second["pitfalls"] = first["pitfalls"] + ["A new trap shows up as a red banner (1:20)"]
+    second["decision_points"] = first["decision_points"] + [{"when": "Big job", "then": "use the machine", "timestamp": "2:05"}]
+    f.write_text(json.dumps(second))
+    assert run_forge([str(f)], env).returncode == 0
+    md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
+    assert "- Watch out for the old trap. _(S1 0:15)_" in md
+    assert "- A new trap shows up as a red banner. _(S2 1:20)_" in md
+    assert "- **Small job** → do it by hand _(S1)_" in md and "- **Big job** → use the machine _(S2 2:05)_" in md
+
+    r = run_forge([str(f)], env)                                   # idempotent with the normalised pitfalls
+    assert json.loads(r.stdout)["written"] == "unchanged"
