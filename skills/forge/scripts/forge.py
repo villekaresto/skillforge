@@ -74,9 +74,7 @@ def render_skill_md(d: dict) -> str:
             line = f"{i}. **{step['step']}**"
             if step.get("detail"):
                 line += f" {step['detail']}"
-            where = labels.get(step.get("source") or "") if len(d["sources"]) > 1 else None
-            if step.get("timestamp") or where:
-                line += f" _({' '.join(x for x in (where or 'source', step.get('timestamp')) if x)})_"
+            line += cite(step, labels, len(d["sources"]) > 1)
             out.append(line)
         out.append("")
     if d.get("decision_points"):
@@ -110,6 +108,18 @@ def source_labels(sources: list[dict]) -> dict:
     return labels
 
 
+def cite(step: dict, labels: dict, multi: bool) -> str:
+    """' _(S1 0:43; S2 0:38)_' for a step backed by several sources, ' _(source 0:43)_' for a single-source skill."""
+    refs = step.get("refs") or ([{"source": step.get("source"), "timestamp": step.get("timestamp")}]
+                                if step.get("timestamp") or step.get("source") else [])
+    parts = []
+    for r in refs:
+        where = labels.get(r.get("source") or "") if multi else None
+        parts.append(" ".join(x for x in (where or ("" if multi else "source"), r.get("timestamp")) if x))
+    parts = [p for p in parts if p]
+    return f" _({'; '.join(parts)})_" if parts else ""
+
+
 def attribute_steps(procedure: list[dict], old: dict | None, new_src: dict) -> list[dict]:
     """Give every step a `source` once a skill has several: a step carried over unchanged from the stored
     version keeps (or inherits) the old source, anything else came from the source being merged in now."""
@@ -121,7 +131,7 @@ def attribute_steps(procedure: list[dict], old: dict | None, new_src: dict) -> l
     new_id = new_src.get("id") or new_src["url"]
     out = []
     for step in procedure:
-        if not step.get("source"):
+        if not step.get("source") and not step.get("refs"):
             step = {**step, "source": known.get(step["step"]) or new_id}
         out.append(step)
     return out

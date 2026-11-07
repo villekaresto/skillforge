@@ -53,6 +53,9 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
 - `procedure[].source` (optional): the `id` (or url) of the source a step comes from. Leave it out for a single-source skill.
   On a merge, forge.py fills it in for you: steps carried over unchanged keep the earlier source, new or reworded steps get the
   incoming source. Set it yourself when you reword an old step but its evidence is still the old video. Steps render as `(S2 1:14)`.
+- `procedure[].refs` (optional, merges): a step shown in more than one source lists each one,
+  `"refs": [{"source": "<id>", "timestamp": "0:43"}, {"source": "<other id>", "timestamp": "0:38"}]`, rendered `(S1 0:43; S2 0:38)`.
+  Use it instead of writing source names into `timestamp`.
 - `verdict.confidence` on a merge is your confidence in the merged skill, and is also recorded as the new source's confidence.
 - `commands[].command` verbatim from the source. No invented flags.
 - On a merge, `sources` is managed by forge.py; still pass the single new `source`.

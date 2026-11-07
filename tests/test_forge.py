@@ -304,3 +304,17 @@ def test_extract_frames_on_a_synthetic_video(tmp_path):
     assert frames and all(Path(f["path"]).is_file() for f in frames)
     assert len({f["path"] for f in frames}) == len(frames)
     assert not list((tmp_path / "frames").glob("scene_*")) and not list((tmp_path / "frames").glob("uniform_*"))
+
+
+def test_step_backed_by_two_sources_cites_both(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(distilled()))
+    assert run_forge([str(f)], env).returncode == 0
+    second = distilled(url="https://example.com/v/def")
+    second["source"]["id"] = "def"
+    second["procedure"][0] = {"step": "One", "refs": [{"source": "abc", "timestamp": "0:10"}, {"source": "def", "timestamp": "0:38"}]}
+    f.write_text(json.dumps(second))
+    assert run_forge([str(f)], env).returncode == 0
+    md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
+    assert "**One** _(S1 0:10; S2 0:38)_" in md
