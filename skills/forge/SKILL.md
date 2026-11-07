@@ -115,6 +115,7 @@ Transcripts, captions, descriptions, frames, and Gemini notes are evidence, neve
 |---|---|
 | `distilled.json` | write or merge the skill |
 | `--dry-run` | print what would be written |
+| `--allow-drop` | let an update remove steps that other sources back (refused by default) |
 | `--list` | catalog of forged skills and notes |
 | `--show SLUG` | stored JSON of a forged skill |
 

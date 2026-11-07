@@ -195,7 +195,22 @@ def validate(d: dict) -> None:
         die("source needs url")
 
 
-def forge(d: dict, dry_run: bool) -> None:
+def dropped_steps(existing: dict | None, procedure: list[dict], incoming: dict) -> list[str]:
+    """Stored steps that cite a source other than the incoming one and are missing from the new procedure.
+    That is what re-forging an old single-source distilled.json over a merged skill looks like."""
+    if not existing or len(existing.get("sources", [])) < 2:
+        return []
+    mine = {incoming.get("id"), incoming["url"]} - {None}
+    kept = {st["step"] for st in procedure}
+    lost = []
+    for st in existing.get("procedure", []):
+        cited = {r.get("source") for r in st.get("refs") or []} | {st.get("source")}
+        if st["step"] not in kept and cited - {None} - mine:
+            lost.append(st["step"])
+    return lost
+
+
+def forge(d: dict, dry_run: bool, allow_drop: bool = False) -> None:
     validate(d)
     src = dict(d["source"])
     src.setdefault("ingested_at", dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"))
@@ -228,6 +243,10 @@ def forge(d: dict, dry_run: bool) -> None:
         sources.append(src)
     # Re-forging the same source with the same content re-renders the files but is not a new version.
     content = {k: v for k, v in d.items() if k != "source"}
+    lost = dropped_steps(existing, content.get("procedure", []), src)
+    if lost and not allow_drop:
+        die(f"this would drop {len(lost)} step(s) that other sources of '{slug}' back: {lost[:5]}. "
+            f"Load the stored version with --show {slug} and merge into it, or pass --allow-drop if removing them is intended.")
     if len(sources) > 1 and content.get("procedure"):
         content["procedure"] = attribute_steps(content["procedure"], existing, src)
     old_content = {k: v for k, v in (existing or {}).items() if k not in ("sources", "forged_at", "version")}
@@ -264,6 +283,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("distilled", nargs="?", help="Path to distilled JSON written by Claude")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--allow-drop", action="store_true", help="allow an update to remove steps that other sources back")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--show", metavar="SLUG")
     a = ap.parse_args()
@@ -279,7 +299,7 @@ def main() -> None:
         return
     if not a.distilled:
         ap.error("distilled JSON path required")
-    forge(json.loads(Path(a.distilled).read_text(encoding="utf-8")), a.dry_run)
+    forge(json.loads(Path(a.distilled).read_text(encoding="utf-8")), a.dry_run, a.allow_drop)
 
 
 if __name__ == "__main__":

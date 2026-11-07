@@ -318,3 +318,21 @@ def test_step_backed_by_two_sources_cites_both(tmp_path, monkeypatch):
     assert run_forge([str(f)], env).returncode == 0
     md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
     assert "**One** _(S1 0:10; S2 0:38)_" in md
+
+
+def test_reforging_an_old_source_cannot_silently_drop_merged_steps(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    first = distilled()
+    f.write_text(json.dumps(first))
+    assert run_forge([str(f)], env).returncode == 0
+    second = distilled(url="https://example.com/v/def")
+    second["source"]["id"] = "def"
+    second["procedure"].append({"step": "Four, only in the second video", "timestamp": "2:00"})
+    f.write_text(json.dumps(second))
+    assert run_forge([str(f)], env).returncode == 0
+
+    f.write_text(json.dumps(first))                      # stale single-source distilled for source 1
+    r = run_forge([str(f)], env)
+    assert r.returncode == 2 and "Four, only in the second video" in r.stderr
+    assert run_forge([str(f), "--allow-drop"], env).returncode == 0
