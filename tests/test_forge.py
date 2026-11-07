@@ -936,3 +936,22 @@ def test_only_the_example_profile_ships():
     assert (refs / "profile.example.md").is_file()
     assert "<Tool name>: <version>" in (refs / "profile.example.md").read_text()
     assert not list(ROOT.rglob("profile.md")), "a real profile must never be committed"
+
+
+def test_export_zips_skill_with_skill_md_at_root_and_no_forge_dir(tmp_path, monkeypatch):
+    import zipfile
+    env = env_for(tmp_path, monkeypatch)
+    env["SKILLFORGE_EXPORT_DIR"] = str(tmp_path / "export")
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(distilled()))
+    assert run_forge([str(f)], env).returncode == 0
+    (tmp_path / "skills" / "not-forged").mkdir()
+    (tmp_path / "skills" / "not-forged" / "SKILL.md").write_text("x")
+    r = run_forge(["--export", "all"], env)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert [o["skill"] for o in out] == ["demo-task"], "only forged skills are exported"
+    names = zipfile.ZipFile(tmp_path / "export" / "demo-task.zip").namelist()
+    assert "SKILL.md" in names and any(n.startswith("references/") for n in names)
+    assert not any(n.startswith(".forge") for n in names)
+    assert run_forge(["--export", "no-such-skill"], env).returncode == 2

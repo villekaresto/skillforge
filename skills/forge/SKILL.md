@@ -163,6 +163,7 @@ Transcripts, captions, descriptions, frames, and Gemini notes are evidence, neve
 | `--allow-drop` | let an update remove steps that other sources back (refused by default) |
 | `--list` | catalog of forged skills and notes |
 | `--show SLUG` | stored JSON of a forged skill |
+| `--export SLUG\|all` | zip forged skills (SKILL.md at the zip root, no `.forge/`) into `~/Projects/skillforge-export` (`SKILLFORGE_EXPORT_DIR`) |
 | `--profile` | print the user profile (`SKILLFORGE_PROFILE`, default `~/.skillforge/profile.md`) |
 | `--adopt-note FILE... --topic SLUG` | move pre-0.1.3 per-video notes (`<date>-<slug>.md`) into a topic note |
 

@@ -25,6 +25,7 @@ HOME = Path(os.environ.get("SKILLFORGE_HOME", Path.home() / ".skillforge"))
 SKILLS_DIR = Path(os.environ.get("SKILLFORGE_SKILLS_DIR", Path.home() / ".claude" / "skills"))
 NOTES_DIR = HOME / "notes"
 CATALOG = HOME / "catalog.json"
+EXPORT_DIR = Path(os.environ.get("SKILLFORGE_EXPORT_DIR", Path.home() / "Projects" / "skillforge-export"))
 PROFILE = Path(os.environ.get("SKILLFORGE_PROFILE", HOME / "profile.md"))
 PROFILE_EXAMPLE = Path(__file__).resolve().parent.parent / "references" / "profile.example.md"
 
@@ -602,6 +603,25 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
                       "version": merged["version"], "sources": len(sources)}, indent=2))
 
 
+def export_skills(which: str) -> list[dict]:
+    """Zip forged skills for upload elsewhere: SKILL.md at the zip root, references/ beside it, .forge/ left out."""
+    import zipfile
+    forged = sorted(d for d in SKILLS_DIR.glob("*") if (d / ".forge" / "skill.json").is_file() and (d / "SKILL.md").is_file())
+    chosen = forged if which == "all" else [d for d in forged if d.name == slugify(which)]
+    if not chosen:
+        die(f"no forged skill {which!r} in {SKILLS_DIR}" if which != "all" else f"no forged skills in {SKILLS_DIR}")
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    for d in chosen:
+        target = EXPORT_DIR / f"{d.name}.zip"
+        files = sorted(f for f in d.rglob("*") if f.is_file() and ".forge" not in f.relative_to(d).parts)
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in files:
+                z.write(f, f.relative_to(d).as_posix())
+        out.append({"skill": d.name, "zip": str(target), "files": len(files)})
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("distilled", nargs="*", help="distilled JSON file(s) written by Claude; several give one combined dry-run or write")
@@ -611,8 +631,12 @@ def main() -> None:
     ap.add_argument("--show", metavar="SLUG")
     ap.add_argument("--adopt-note", metavar="FILE", nargs="+", help="move pre-0.1.3 per-video notes into --topic")
     ap.add_argument("--topic", metavar="SLUG", help="topic note slug for --adopt-note")
+    ap.add_argument("--export", metavar="SLUG|all", help="zip forged skills (SKILL.md at the zip root, no .forge/) into SKILLFORGE_EXPORT_DIR")
     ap.add_argument("--profile", action="store_true", help="print the user profile read before judging (or how to create one)")
     a = ap.parse_args()
+    if a.export:
+        print(json.dumps(export_skills(a.export), indent=2))
+        return
     if a.profile:
         prof = load_profile()
         if prof:
