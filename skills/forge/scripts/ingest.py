@@ -62,7 +62,10 @@ def need(binary: str) -> str:
 
 
 def run(cmd: list, timeout: int | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run([str(c) for c in cmd], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    # stdin=DEVNULL: ffmpeg reads keystrokes from stdin, and in a shell loop (`while read ...; do ingest.py; done`)
+    # it swallowed the next input lines.
+    return subprocess.run([str(c) for c in cmd], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                          stdin=subprocess.DEVNULL)
 
 
 def tail(text: str, lines: int = 4, limit: int = 600) -> str:
@@ -360,7 +363,7 @@ def vfr_flag(ffmpeg: str) -> list[str]:
 
 
 def thumb(ffmpeg: str, img: Path) -> bytes:
-    r = subprocess.run([ffmpeg, "-v", "quiet", "-i", str(img), "-vf", "scale=16:16", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+    r = subprocess.run([ffmpeg, "-v", "quiet", "-i", str(img), "-vf", "scale=16:16", "-f", "rawvideo", "-pix_fmt", "gray", "-"], stdin=subprocess.DEVNULL,
                        capture_output=True)
     return r.stdout
 
@@ -384,7 +387,7 @@ def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 3.0, 
 def is_blank(ffmpeg: str, img: Path) -> bool:
     """A fade-to-black or a single-colour card. Kept deliberately narrow: a dark editor with one line of code
     (mean ~30, sd ~3) must survive, so only near-uniform or near-black frames go."""
-    r = subprocess.run([ffmpeg, "-v", "quiet", "-i", str(img), "-vf", "scale=64:36", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+    r = subprocess.run([ffmpeg, "-v", "quiet", "-i", str(img), "-vf", "scale=64:36", "-f", "rawvideo", "-pix_fmt", "gray", "-"], stdin=subprocess.DEVNULL,
                        capture_output=True)
     px = r.stdout
     if len(px) != 64 * 36:

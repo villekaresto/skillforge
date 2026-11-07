@@ -955,3 +955,17 @@ def test_export_zips_skill_with_skill_md_at_root_and_no_forge_dir(tmp_path, monk
     assert "SKILL.md" in names and any(n.startswith("references/") for n in names)
     assert not any(n.startswith(".forge") for n in names)
     assert run_forge(["--export", "no-such-skill"], env).returncode == 2
+
+
+def test_ingest_never_lets_child_processes_read_stdin(tmp_path):
+    import shutil
+    if not shutil.which("ffmpeg"):
+        __import__("pytest").skip("ffmpeg missing")
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=160x120:d=3:r=25", str(video)], check=True)
+    # Run frame extraction with a pipe on stdin, like a `while read` loop; the pipe must still be unread afterwards.
+    code = ("import sys; sys.path.insert(0, %r); import ingest, pathlib; "
+            "ingest.extract_frames(pathlib.Path(%r), pathlib.Path(%r), 4, 3.0, 160, True); print(sys.stdin.read())"
+            % (str(INGEST.parent), str(video), str(tmp_path)))
+    r = subprocess.run([sys.executable, "-c", code], input="next line one\nnext line two\n", capture_output=True, text=True)
+    assert "next line one" in r.stdout and "next line two" in r.stdout, r.stderr
