@@ -336,3 +336,20 @@ def test_reforging_an_old_source_cannot_silently_drop_merged_steps(tmp_path, mon
     r = run_forge([str(f)], env)
     assert r.returncode == 2 and "Four, only in the second video" in r.stderr
     assert run_forge([str(f), "--allow-drop"], env).returncode == 0
+
+
+def test_thinning_keeps_a_long_static_stretch_covered():
+    pairs = [(Path(f"s{i}.jpg"), i * 0.5) for i in range(40)]            # a burst of cuts in the first 20 s
+    pairs += [(Path(f"u{i}.jpg"), 20.0 + i * 24) for i in range(25)]     # uniform frames over the next 10 minutes
+    kept = ingest.thin_by_time(pairs, max_frames=20, duration=620)
+    assert len(kept) == 20
+    times = sorted(t for _, t in kept)
+    assert max(b - a for a, b in zip(times, times[1:])) <= 62, "no gap longer than ~2 buckets"
+
+
+def test_note_renders_commands(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(distilled(worthy=False)))
+    r = run_forge([str(f), "--dry-run"], env)
+    assert "ls -la" in r.stdout

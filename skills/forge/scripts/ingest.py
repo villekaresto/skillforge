@@ -286,18 +286,37 @@ def thumb(ffmpeg: str, img: Path) -> bytes:
     return r.stdout
 
 
-def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 3.0) -> list[tuple[Path, float]]:
-    """Return the frames that differ from the previously kept one; does not delete anything."""
+def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 3.0, max_gap: float | None = None) -> list[tuple[Path, float]]:
+    """Return the frames that differ from the previously kept one; does not delete anything.
+    A frame `max_gap` seconds after the last kept one is kept anyway: code being typed in an editor barely changes
+    a 16x16 thumbnail, and those minutes are usually the ones that matter."""
     kept: list[tuple[Path, float]] = []
     last: bytes | None = None
     for f, t in pairs:
         cur = thumb(ffmpeg, f)
-        if last is not None and len(cur) == len(last) == 256:
+        if last is not None and len(cur) == len(last) == 256 and not (max_gap and t - kept[-1][1] >= max_gap):
             if sum(abs(a - b) for a, b in zip(cur, last)) / 256 < threshold:
                 continue
         kept.append((f, t))
         last = cur
     return kept
+
+
+def thin_by_time(pairs: list[tuple[Path, float]], max_frames: int, duration: float | None) -> list[tuple[Path, float]]:
+    """Pick at most `max_frames`, one per equal time bucket first, so a burst of cuts (memes, slides) cannot crowd out
+    a long static stretch; leftover slots go to the remaining frames, evenly by index."""
+    if len(pairs) <= max_frames:
+        return pairs
+    span = duration or (pairs[-1][1] + 1)
+    chosen: dict[int, int] = {}
+    for i, (_, t) in enumerate(pairs):
+        chosen.setdefault(min(int(t / span * max_frames), max_frames - 1), i)
+    keep = set(chosen.values())
+    rest = [i for i in range(len(pairs)) if i not in keep]
+    need = max_frames - len(keep)
+    if need > 0 and rest:
+        keep |= {rest[round(j * (len(rest) - 1) / max(need - 1, 1))] for j in range(min(need, len(rest)))}
+    return [p for i, p in enumerate(pairs) if i in keep]
 
 
 def settle_times(stamps: list[float], duration: float | None, gap: float = 1.0, settle: float = 0.7) -> list[float]:
@@ -337,7 +356,7 @@ def extract_frames(video: Path, out: Path, max_frames: int, duration: float | No
         pairs += [(f, i * step) for i, f in enumerate(sorted(frames_dir.glob("uniform_*.jpg")))]
     pairs.sort(key=lambda p: p[1])
     if not no_dedup and pairs:
-        kept = dedup(ffmpeg, pairs)
+        kept = dedup(ffmpeg, pairs, max_gap=max((duration or 0) / max(max_frames, 1) * 2, 20.0))
         if len(kept) >= max(3, min(max_frames, len(pairs)) // 4):
             if len(kept) != len(pairs):
                 log(f"frames: dropped {len(pairs) - len(kept)} near-duplicates")
@@ -345,11 +364,10 @@ def extract_frames(video: Path, out: Path, max_frames: int, duration: float | No
         else:
             log("frames: dedup would leave too few frames (static content); keeping all")
     if len(pairs) > max_frames:
-        keep = {round(i * (len(pairs) - 1) / (max_frames - 1)) for i in range(max_frames)}
-        for i, (f, _) in enumerate(pairs):
-            if i not in keep:
-                f.unlink()
-        pairs = [p for i, p in enumerate(pairs) if i in keep]
+        kept = thin_by_time(pairs, max_frames, duration)
+        for f, _ in set(pairs) - set(kept):
+            f.unlink()
+        pairs = kept
     result = []
     for i, (f, t) in enumerate(pairs, 1):
         new = frames_dir / f"{i:03d}_{hms(t).replace(':', '-')}.jpg"

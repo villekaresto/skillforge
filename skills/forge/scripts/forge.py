@@ -170,6 +170,11 @@ def render_note(d: dict, src: dict) -> str:
     if d.get("procedure"):
         out += ["## Steps shown (not forged as a skill)",
                 *[f"{i}. {st['step']}" + (f" ({st['timestamp']})" if st.get("timestamp") else "") for i, st in enumerate(d["procedure"], 1)], ""]
+    if d.get("commands"):
+        out += ["## Commands shown (transcribed, review before running)"]
+        for c in d["commands"]:
+            out += [f"{c.get('description', 'command')} _({c.get('timestamp', '')})_", "", "```" + (c.get("language") or ""),
+                    c["command"].rstrip(), "```", ""]
     if d.get("assumed_knowledge"):
         out += ["## What the speaker assumes you know", *[f"- {a}" for a in d["assumed_knowledge"]], ""]
     if d.get("contestable"):
