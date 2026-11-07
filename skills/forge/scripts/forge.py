@@ -315,7 +315,8 @@ STAMP_IN_TEXT = re.compile(r"\(\s*(?:[A-Z][\w-]*\s+)?\d{1,2}:\d{2}(?::\d{2})?")
 def lint(d: dict, skill_md: str) -> list[str]:
     """Tightness checks shown in the dry-run. They warn; they never block a write."""
     out = []
-    words = len(skill_md.split())
+    body = skill_md.split("\n---\n", 1)[-1].split("\n## Sources", 1)[0]     # instructions only: no frontmatter, no Sources
+    words = len(body.split())
     if words > 900:
         out.append(f"SKILL.md is {words} words; aim for under 900 (move demo values and per-source detail into key_claims)")
     steps = d.get("procedure") or []

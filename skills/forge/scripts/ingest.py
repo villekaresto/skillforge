@@ -273,7 +273,9 @@ def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dic
         subs, provenance, errors, r = caption_passes(base, out)
     info_files = list(out.glob("media*.info.json"))
     if not info_files:
-        hint = "   Try --cookies-from-browser firefox for private or age-restricted sources." if "Sign in" in r.stderr or "Private" in r.stderr else ""
+        needs_login = any(k in r.stderr for k in ("Sign in", "Private", "logged-in", "login", "--cookies", "HTTP Error 401"))
+        hint = "\n   This source needs an account: if you have access, add --cookies-from-browser firefox (or chrome, safari)." \
+            if needs_login else ""
         die(f"yt-dlp could not read this URL.\n{r.stderr.strip()[-1200:]}{hint}")
     if not subs and errors:
         # Caption downloads fail transiently (HTTP 429 above all). One patient retry before falling back to transcription.
