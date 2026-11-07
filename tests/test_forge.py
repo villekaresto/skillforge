@@ -240,3 +240,11 @@ def test_whisper_helper_decodes_with_ffmpeg_not_pyav(tmp_path):
     audio = whisper_local.load_audio(str(wav))
     assert audio.dtype == numpy.float32 and 15000 < len(audio) < 17000
     assert "av<" not in INGEST.read_text(), "pinning PyAV forces source builds on platforms without wheels"
+
+
+def test_whisper_language_codes_are_normalised():
+    assert ingest.whisper_language("en-US") == "en"
+    assert ingest.whisper_language("pt_BR") == "pt"
+    assert ingest.whisper_language("zh-Hans") == "zh"
+    assert ingest.whisper_language("de") == "de"
+    assert ingest.whisper_language(None) is None and ingest.whisper_language("und-x") == "und"

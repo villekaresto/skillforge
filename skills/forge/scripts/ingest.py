@@ -346,6 +346,14 @@ def local_available() -> bool:
     return bool(shutil.which("uv"))
 
 
+def whisper_language(code: str | None) -> str | None:
+    """Whisper wants a bare ISO 639-1 code: YouTube metadata says 'en-US', 'pt_BR', 'zh-Hans'."""
+    if not code:
+        return None
+    base = re.split(r"[-_]", code.strip().lower())[0]
+    return base if re.fullmatch(r"[a-z]{2,3}", base) else None
+
+
 def transcribe_local(audio: Path, language: str | None) -> list[dict]:
     helper = Path(__file__).with_name("whisper_local.py")
     cmd = [need("uv"), "run", "--quiet", "--with", "faster-whisper>=1.1", "--python", "3.12", str(helper), str(audio),
@@ -537,7 +545,7 @@ def main() -> None:
 
         if transcribe == "local":
             try:
-                segs = transcribe_local(audio(), meta.get("language") or (args.lang if args.lang != "en" else None))
+                segs = transcribe_local(audio(), whisper_language(meta.get("language") or (args.lang if args.lang != "en" else None)))
                 provenance = "local-whisper"
             except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
                 errors.append(f"local transcription: {tail(str(exc))}")
