@@ -61,7 +61,7 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
   and renders `(S2 1:20)`. Name the symptom the user will see in each pitfall.
 - `useless_frames` (optional): indexes (the `NNN` in `NNN_H-MM-SS.jpg`) of frames that carry nothing: blank, loading screens,
   talking head only, intro/outro cards, near-duplicates. forge.py copies every other frame of this source into
-  `references/frames/<source id>/` and links them from that source's notes. Recorded per source; it never changes the skill's content.
+  `references/frames/<source id>/` and links them from that source's notes. Recorded per source; it never changes the skill's content. Notes do not copy frames, so it has no effect on a note.
 - `verdict.confidence` on a merge is your confidence in the merged skill, and is also recorded as the new source's confidence.
 - `commands[].command` verbatim from the source. No invented flags.
 - On a merge, `sources` is managed by forge.py; still pass the single new `source`.

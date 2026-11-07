@@ -548,3 +548,18 @@ def test_merged_pitfalls_and_decisions_cite_their_source(tmp_path, monkeypatch):
 
     r = run_forge([str(f)], env)                                   # idempotent with the normalised pitfalls
     assert json.loads(r.stdout)["written"] == "unchanged"
+
+
+def test_legacy_per_video_note_is_replaced_by_the_topic_section(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    notes = tmp_path / "home" / "notes"
+    notes.mkdir(parents=True)
+    legacy = notes / "2026-11-07-old-video-name.md"
+    legacy.write_text("# Demo video\n\n- Skill-worthy: no\n")
+    d = distilled(worthy=False)
+    (tmp_path / "home" / "catalog.json").write_text(json.dumps({"skills": {}, "notes": [
+        {"date": "2026-11-07", "url": d["source"]["url"], "title": "Demo video", "file": str(legacy), "reason": "old"}]}))
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    assert run_forge([str(f)], env).returncode == 0
+    assert not legacy.exists() and (notes / "demo-task.md").is_file()

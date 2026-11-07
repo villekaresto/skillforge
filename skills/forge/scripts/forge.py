@@ -264,6 +264,9 @@ def remove_note_section(path: Path, url: str) -> None:
     if not path.is_file():
         return
     text = path.read_text(encoding="utf-8")
+    if NOTE_MARK not in text:
+        path.unlink()            # a pre-0.1.3 note: one file per video, superseded by this source's new section
+        return
     for u, sec in note_sections(text):
         if u == url:
             text = text.replace(sec, "")
