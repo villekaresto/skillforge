@@ -1,0 +1,10 @@
+{
+  "name": "forge",
+  "version": "0.1.0",
+  "description": "Learn from any video or podcast and forge a Claude Code skill from it when it deserves one.",
+  "author": { "name": "skillforge contributors", "url": "https://github.com/villekaresto/skillforge" },
+  "homepage": "https://github.com/villekaresto/skillforge",
+  "repository": "https://github.com/villekaresto/skillforge",
+  "license": "MIT",
+  "keywords": ["video", "podcast", "youtube", "instagram", "learning", "skills", "yt-dlp", "gemini", "knowledge"]
+}
