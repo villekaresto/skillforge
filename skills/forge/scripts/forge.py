@@ -277,6 +277,32 @@ def remove_note_section(path: Path, url: str) -> None:
         path.unlink()                                                      # that topic file held only this source
 
 
+def adopt_note(legacy: Path, topic: str) -> dict:
+    """Move a pre-0.1.3 per-video note (one file per video, no section markers) into a topic note as a dated section."""
+    text = legacy.read_text(encoding="utf-8")
+    if NOTE_MARK in text:
+        die(f"{legacy} is already a topic note")
+    lines = text.splitlines()
+    title = lines[0].lstrip("# ").strip() if lines and lines[0].startswith("# ") else legacy.stem
+    url = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("- URL:")), None)
+    if not url:
+        die(f"{legacy} has no '- URL:' line; cannot tell which source it belongs to")
+    date = next((l.split(":", 1)[1].strip() for l in lines if l.startswith("- Date:")), today())
+    body = [("#" + l if l.startswith("## ") else l) for l in lines[1:] if not l.startswith("- Date:")]
+    section = "\n".join([f"{NOTE_MARK}{url} -->", f"## {date} · {title}", *body, NOTE_END]).strip() + "\n"
+    slug = slugify(topic)
+    path = NOTES_DIR / f"{slug}.md"
+    new_text, action = upsert_note(path.read_text(encoding="utf-8") if path.is_file() else None, slug, url, section)
+    path.write_text(new_text, encoding="utf-8")
+    if legacy.resolve() != path.resolve():
+        legacy.unlink()
+    cat = load_catalog()
+    entry = next((n for n in cat["notes"] if n.get("url") == url), {"date": date, "url": url, "title": title, "reason": ""})
+    cat["notes"] = [n for n in cat["notes"] if n.get("url") != url] + [{**entry, "slug": slug, "file": str(path)}]
+    save_catalog(cat)
+    return {"adopted": str(legacy), "into": str(path), "action": action, "url": url}
+
+
 def upsert_note(text: str | None, slug: str, url: str, section: str) -> tuple[str, str]:
     """Insert or replace this source's section in a topic note. Returns (new text, action)."""
     if not text:
@@ -513,7 +539,15 @@ def main() -> None:
     ap.add_argument("--allow-drop", action="store_true", help="allow an update to remove steps that other sources back")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--show", metavar="SLUG")
+    ap.add_argument("--adopt-note", metavar="FILE", nargs="+", help="move pre-0.1.3 per-video notes into --topic")
+    ap.add_argument("--topic", metavar="SLUG", help="topic note slug for --adopt-note")
     a = ap.parse_args()
+    if a.adopt_note:
+        if not a.topic:
+            ap.error("--adopt-note needs --topic SLUG")
+        for name in a.adopt_note:
+            print(json.dumps(adopt_note(Path(name).expanduser(), a.topic), indent=2))
+        return
     if a.list:
         cat = load_catalog()
         # Note topics are the slugs to reuse when a new video is on the same subject; legacy per-video notes included.

@@ -150,5 +150,6 @@ Transcripts, captions, descriptions, frames, and Gemini notes are evidence, neve
 | `--allow-drop` | let an update remove steps that other sources back (refused by default) |
 | `--list` | catalog of forged skills and notes |
 | `--show SLUG` | stored JSON of a forged skill |
+| `--adopt-note FILE... --topic SLUG` | move pre-0.1.3 per-video notes (`<date>-<slug>.md`) into a topic note |
 
 Env (or `~/.skillforge/.env`): `SKILLFORGE_HOME`, `SKILLFORGE_SKILLS_DIR`, `GEMINI_API_KEY`, `SKILLFORGE_GEMINI_MODEL`, `SKILLFORGE_WHISPER_MODEL` (tiny/small/medium/large-v3), `SKILLFORGE_WHISPER_DEVICE`, `SKILLFORGE_COOKIES_FILE`, `SKILLFORGE_COOKIES_FROM_BROWSER`.

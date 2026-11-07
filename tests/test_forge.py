@@ -792,3 +792,23 @@ def test_tightening_rewrite_of_a_merged_skill_is_allowed_but_deletion_is_not(tmp
     f.write_text(json.dumps(first_again))
     r = run_forge([str(f)], env)
     assert r.returncode == 2 and "Do four" in r.stderr
+
+
+def test_legacy_notes_can_be_adopted_into_a_topic(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    notes = tmp_path / "home" / "notes"
+    notes.mkdir(parents=True)
+    for i in (1, 2):
+        (notes / f"2026-11-07-old-{i}.md").write_text(
+            f"# Old video {i}\n\n- URL: https://e/v/{i}\n- By: Someone\n- Date: 2026-11-07\n- Skill-worthy: no (confidence 0.8)\n\n## Takeaway\nPoint {i}.\n")
+    r = run_forge(["--adopt-note", str(notes / "2026-11-07-old-1.md"), str(notes / "2026-11-07-old-2.md"), "--topic", "Bike Tubes"], env)
+    assert r.returncode == 0, r.stderr
+    text = (notes / "bike-tubes.md").read_text()
+    assert text.count("<!-- forge-note: ") == 2 and "## 2026-11-07 · Old video 1" in text and "### Takeaway" in text
+    assert not list(notes.glob("2026-11-07-*"))
+    cat = json.loads((tmp_path / "home" / "catalog.json").read_text())
+    assert {n["slug"] for n in cat["notes"]} == {"bike-tubes"}
+    d = distilled(url="https://e/v/3", worthy=False)                 # a new source on the topic appends
+    d["slug"] = "bike-tubes"
+    (tmp_path / "d.json").write_text(json.dumps(d))
+    assert json.loads(run_forge([str(tmp_path / "d.json")], env).stdout)["action"] == "append"
