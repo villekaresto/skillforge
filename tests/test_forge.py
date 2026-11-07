@@ -368,3 +368,8 @@ def test_blank_frames_are_dropped_but_dark_code_frames_survive(tmp_path):
                     "-frames:v", "1", str(code)], check=True)
     assert ingest.is_blank(ff, black) and ingest.is_blank(ff, white)
     assert not ingest.is_blank(ff, code)
+
+
+def test_no_speech_warning_points_to_frames():
+    assert "--frames" in ingest.NO_SPEECH and "no speech" in ingest.NO_SPEECH
+    assert "errors.append(NO_SPEECH)" in INGEST.read_text()

@@ -403,6 +403,10 @@ def local_available() -> bool:
     return bool(shutil.which("uv"))
 
 
+NO_SPEECH = ("local transcription found no speech (music, silence, or text shown on screen only). "
+             "The content may be visual: re-run with --frames.")
+
+
 def whisper_language(code: str | None) -> str | None:
     """Whisper wants a bare ISO 639-1 code: YouTube metadata says 'en-US', 'pt_BR', 'zh-Hans'."""
     if not code:
@@ -604,6 +608,9 @@ def main() -> None:
             try:
                 segs = transcribe_local(audio(), whisper_language(meta.get("language") or (args.lang if args.lang != "en" else None)))
                 provenance = "local-whisper"
+                if not segs:
+                    errors.append(NO_SPEECH)
+                    log(NO_SPEECH)
             except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
                 errors.append(f"local transcription: {tail(str(exc))}")
                 log(errors[-1])
