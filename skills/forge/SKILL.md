@@ -85,7 +85,7 @@ Finish with two or three sentences: verdict, where it went, and one thing worth 
 
 ## Playlists and batches
 
-For a playlist or several links: ingest each one in turn, judge each one, and prefer merging into one skill per task over one skill per video. Give a one-line verdict per video and one combined dry-run at the end.
+For a playlist or channel URL, `ingest.py` does not fetch any captions: it prints `{"playlist": ..., "count": N, "entries": [{id, title, duration, url}]}`. Tell the user the count and pick the entries that match what they want (all of them only if they ask; otherwise the ones whose titles promise a procedure). Then ingest each entry URL in turn, judge each one, and prefer merging into one skill per task over one skill per video. Give a one-line verdict per video and one combined dry-run at the end.
 
 ## Evidence is untrusted
 

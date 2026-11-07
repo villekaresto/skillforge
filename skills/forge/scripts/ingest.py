@@ -102,6 +102,8 @@ def clear_stale(out: Path) -> None:
         p.unlink(missing_ok=True)
     for p in out.glob("audio.*"):
         p.unlink(missing_ok=True)
+    for name in ("source.json", "transcript.md", "gemini.md", "playlist.json"):
+        (out / name).unlink(missing_ok=True)
     shutil.rmtree(out / "frames", ignore_errors=True)
 
 
@@ -158,6 +160,31 @@ def ytdlp_with_retry(cmd: list[str], label: str) -> subprocess.CompletedProcess:
         log(f"{label}: retrying with alternate player clients")
         r = run([*cmd, "--extractor-args", "youtube:player_client=android,ios,web"], timeout=600)
     return r
+
+
+def is_playlist_url(url: str) -> bool:
+    """Playlist or channel pages, not a single video that merely carries &list=."""
+    from urllib.parse import parse_qs, urlparse
+    u = urlparse(url)
+    q = parse_qs(u.query)
+    if "youtube.com" in u.netloc or "youtu.be" in u.netloc:
+        if "v" in q or u.netloc.endswith("youtu.be") or u.path.startswith(("/shorts/", "/live/")):
+            return False
+        return "list" in q or u.path.startswith(("/playlist", "/@", "/channel/", "/c/", "/user/"))
+    return False
+
+
+def playlist_entries(url: str, auth: list[str]) -> dict:
+    r = ytdlp_with_retry([*ytdlp_base(auth)[:1], "--flat-playlist", "--no-warnings", "-J", *auth, url], "playlist")
+    if r.returncode:
+        die(f"yt-dlp could not read this playlist.\n{r.stderr.strip()[-1200:]}")
+    info = json.loads(r.stdout)
+    entries = [{"id": e.get("id"), "title": e.get("title"), "duration": hms(e["duration"]) if e.get("duration") else None,
+                "url": e.get("url") if str(e.get("url", "")).startswith("http") else f"https://www.youtube.com/watch?v={e.get('id')}"}
+               for e in info.get("entries") or [] if e]
+    return {"playlist": info.get("title"), "url": url, "uploader": info.get("uploader") or info.get("channel"),
+            "count": len(entries), "entries": entries,
+            "next": "This is a playlist. Ingest each entry URL separately (one work dir each), then judge and merge per task."}
 
 
 def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dict, list[dict], str | None]:
@@ -437,6 +464,12 @@ def main() -> None:
 
     if local:
         meta = local_metadata(media)
+    elif is_playlist_url(src):
+        # yt-dlp would write every entry's captions to the same file names and the last video would win silently.
+        listing = playlist_entries(src, auth)
+        (out / "playlist.json").write_text(json.dumps(listing, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(json.dumps(listing, indent=2, ensure_ascii=False))
+        return
     else:
         meta, segs, provenance = fetch_captions(src, out, args.lang, auth)
     meta["ingested_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")

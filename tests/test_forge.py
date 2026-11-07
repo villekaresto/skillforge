@@ -203,3 +203,19 @@ def test_same_source_twice_is_idempotent(tmp_path, monkeypatch):
     assert json.loads(r.stdout)["written"] == "update"
     stored = json.loads((tmp_path / "skills" / "demo-task" / ".forge" / "skill.json").read_text())
     assert stored["version"] == 2 and len(stored["sources"]) == 1
+
+
+def test_playlist_urls_are_detected_but_single_videos_are_not():
+    yes = ["https://www.youtube.com/playlist?list=PL1oT_5mNYVTOFA45zQO939vwvyodldvIk", "https://www.youtube.com/@ERP",
+           "https://www.youtube.com/channel/UCkQPikELWZFLgQNHd73jkdg/videos"]
+    no = ["https://www.youtube.com/watch?v=1IQB_q-2YW8&list=PL1oT_5mNYVTOFA45zQO939vwvyodldvIk", "https://youtu.be/1IQB_q-2YW8",
+          "https://www.youtube.com/shorts/96HKB_QcRN0", "https://www.tiktok.com/@ERP/video/7695791676148796693", "https://vimeo.com/123"]
+    assert all(ingest.is_playlist_url(u) for u in yes)
+    assert not any(ingest.is_playlist_url(u) for u in no)
+
+
+def test_reused_out_dir_drops_previous_evidence(tmp_path):
+    for name in ("source.json", "transcript.md", "gemini.md", "playlist.json", "media.en.vtt", "audio.m4a"):
+        (tmp_path / name).write_text("stale")
+    ingest.clear_stale(tmp_path)
+    assert not list(tmp_path.iterdir())
