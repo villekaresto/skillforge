@@ -81,4 +81,4 @@ Tests cover forging, merging and step attribution, idempotence, notes, validatio
 - Quiz and flashcard generation from the distilled notes
 - Conflict review UI when two sources disagree
 
-MIT. Built by [skillforge contributors](https://github.com/villekaresto/skillforge).
+MIT.

@@ -5,5 +5,5 @@ __pycache__/
 .DS_Store
 .env
 dist/
-qa-home/work/
-qa-home/qa/logs/
+qa-home/
+*.tar.gz
