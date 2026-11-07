@@ -82,7 +82,9 @@ def is_url(s: str) -> bool:
 
 
 def slugify(text: str, limit: int = 60) -> str:
-    text = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    import unicodedata
+    text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()   # cómo -> como, café -> cafe
+    text = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return text[:limit].rstrip("-") or "untitled"
 
 
@@ -359,6 +361,8 @@ def extract_frames(video: Path, out: Path, max_frames: int, duration: float | No
     """Scene changes (threshold 0.2) plus a uniform pass, merged by time, near-duplicates removed, thinned to the cap.
     The uniform pass guarantees coverage of slow screen recordings where typing never trips the scene detector."""
     ffmpeg = need("ffmpeg")
+    if duration and duration < 120:                       # a 30 s short needs ~12 frames, not 40 near-identical ones
+        max_frames = min(max_frames, max(4, int(duration / 2.5)))
     frames_dir = out / "frames"
     frames_dir.mkdir(exist_ok=True)
     scale = f"scale='min({width},iw)':-2"
@@ -413,6 +417,7 @@ def local_available() -> bool:
 
 NO_SPEECH = ("local transcription found no speech (music, silence, or text shown on screen only). "
              "The content may be visual: re-run with --frames.")
+NO_SPEECH_FRAMES = "local transcription found no speech (music or silence); the frames are the evidence."
 
 
 def whisper_language(code: str | None) -> str | None:
@@ -511,7 +516,7 @@ def parse_gemini_transcript(text: str) -> list[dict]:
 
 # --------------------------------------------------------------------------- output
 
-def write_transcript_md(meta: dict, segs: list[dict], provenance: str | None, out: Path) -> Path:
+def write_transcript_md(meta: dict, segs: list[dict], provenance: str | None, out: Path, has_frames: bool = False) -> Path:
     lines = [f"# {meta.get('title') or 'Untitled'}", "", f"- Source: {meta['url']}", f"- By: {meta.get('uploader') or 'unknown'}",
              f"- Duration: {hms(meta['duration']) if meta.get('duration') else 'unknown'}", f"- Transcript: {provenance or 'none'}", ""]
     if meta.get("chapters"):
@@ -520,7 +525,9 @@ def write_transcript_md(meta: dict, segs: list[dict], provenance: str | None, ou
         lines += ["## Description", meta["description"].strip(), ""]
     lines.append("## Transcript")
     if not segs:
-        lines.append("_Local transcription ran and found no speech (music, silence, or on-screen text only). Re-run with --frames._"
+        lines.append("_Local transcription ran and found no speech. The frames in frames/ are the evidence._"
+                     if provenance == "local-whisper" and has_frames else
+                     "_Local transcription ran and found no speech (music, silence, or on-screen text only). Re-run with --frames._"
                      if provenance == "local-whisper" else
                      "_No transcript available. Use --engine local (needs uv) or --engine gemini (needs GEMINI_API_KEY), or --frames._")
     lines += [f"[{hms(s['start'])}] {s['text']}" for s in segs]
@@ -622,8 +629,8 @@ def main() -> None:
                 segs = transcribe_local(audio(), whisper_language(args.lang if args.lang != "en" or args.lang_given else None))
                 provenance = "local-whisper"
                 if not segs:
-                    errors.append(NO_SPEECH)
-                    log(NO_SPEECH)
+                    errors.append(NO_SPEECH_FRAMES if frames else NO_SPEECH)
+                    log(errors[-1])
             except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
                 errors.append(f"local transcription: {tail(str(exc))}")
                 log(errors[-1])
@@ -652,7 +659,7 @@ def main() -> None:
     (out / "source.json").write_text(json.dumps({"meta": meta, "transcript": segs, "transcript_provenance": provenance, "frames": frames,
                                                  "gemini_notes_file": str(out / "gemini.md") if gemini_notes else None, "errors": errors},
                                                 indent=2, ensure_ascii=False), encoding="utf-8")
-    md = write_transcript_md(meta, segs, provenance, out)
+    md = write_transcript_md(meta, segs, provenance, out, has_frames=bool(frames))
     print(json.dumps({"work_dir": str(out), "transcript_md": str(md), "title": meta.get("title"), "uploader": meta.get("uploader"),
                       "duration": hms(meta["duration"]) if meta.get("duration") else None, "segments": len(segs),
                       "transcript_provenance": provenance, "frames": len(frames), "gemini_notes": bool(gemini_notes),

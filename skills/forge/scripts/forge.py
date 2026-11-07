@@ -232,13 +232,20 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False) -> None:
 
     if not d["verdict"]["skill_worthy"]:
         slug = slugify(d.get("slug") or re.sub(r"[^a-z0-9]+", "-", (src.get("title") or "note").lower())[:50])
-        path = NOTES_DIR / f"{today()}-{slug}.md"
+        # The same source keeps its note (re-studying it rewrites the file); a different source never overwrites one.
+        previous = next((n for n in cat["notes"] if n.get("url") == src["url"]), None)
+        path = Path(previous["file"]) if previous else NOTES_DIR / f"{today()}-{slug}.md"
+        n = 2
+        while not previous and path.exists():
+            path = NOTES_DIR / f"{today()}-{slug}-{n}.md"
+            n += 1
         text = render_note(d, src)
         if dry_run:
-            print(f"# would write learning note {path}\n\n{text}")
+            print(f"# would {'rewrite' if previous else 'write'} learning note {path}\n\n{text}")
             return
         NOTES_DIR.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+        cat["notes"] = [x for x in cat["notes"] if x.get("url") != src["url"]]
         cat["notes"].append({"date": today(), "url": src["url"], "title": src.get("title"), "file": str(path), "reason": d["verdict"]["reason"]})
         save_catalog(cat)
         print(json.dumps({"written": "note", "path": str(path)}, indent=2))

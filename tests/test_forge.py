@@ -372,7 +372,7 @@ def test_blank_frames_are_dropped_but_dark_code_frames_survive(tmp_path):
 
 def test_no_speech_warning_points_to_frames():
     assert "--frames" in ingest.NO_SPEECH and "no speech" in ingest.NO_SPEECH
-    assert "errors.append(NO_SPEECH)" in INGEST.read_text()
+    assert "NO_SPEECH_FRAMES if frames else NO_SPEECH" in INGEST.read_text()
 
 
 def test_original_language_subtitle_track_wins_over_translation(tmp_path):
@@ -397,3 +397,34 @@ def test_untimed_claims_render_without_empty_brackets(tmp_path, monkeypatch):
 def test_whisper_language_comes_from_the_user_not_youtube_metadata():
     src = INGEST.read_text()
     assert 'whisper_language(meta.get("language")' not in src
+
+
+def test_notes_never_overwrite_another_source_and_never_duplicate(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    a = distilled(worthy=False)
+    f.write_text(json.dumps(a))
+    assert run_forge([str(f)], env).returncode == 0
+    assert run_forge([str(f)], env).returncode == 0                  # same source again: same file, one entry
+    b = distilled(url="https://example.com/v/other", worthy=False)    # same slug, different source
+    f.write_text(json.dumps(b))
+    assert run_forge([str(f)], env).returncode == 0
+    notes = sorted((tmp_path / "home" / "notes").glob("*.md"))
+    assert len(notes) == 2 and any(n.name.endswith("-demo-task-2.md") for n in notes)
+    cat = json.loads((tmp_path / "home" / "catalog.json").read_text())
+    assert [n["url"] for n in cat["notes"]].count(a["source"]["url"]) == 1 and len(cat["notes"]) == 2
+
+
+def test_slug_hint_transliterates_accents():
+    assert ingest.slugify("Cómo reparar un pinchazo") == "como-reparar-un-pinchazo"
+    assert ingest.slugify("Crème brûlée") == "creme-brulee"
+
+
+def test_short_clips_get_fewer_frames(tmp_path):
+    import shutil
+    if not shutil.which("ffmpeg"):
+        __import__("pytest").skip("ffmpeg missing")
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x240:d=20:r=25", str(video)], check=True)
+    frames = ingest.extract_frames(video, tmp_path, max_frames=40, duration=20.0, width=320, no_dedup=True)
+    assert 0 < len(frames) <= 8
