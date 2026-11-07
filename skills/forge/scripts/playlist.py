@@ -77,7 +77,7 @@ def main() -> None:
     chosen = [(i, e) for i, e in chosen if f"{i:02d}-{e['id']}" not in done]
     if previous:
         ingest.log(f"extending an existing run: {len(done)} entries already ingested, {len(chosen)} new")
-    rows = [r for r in previous if r.get("ok")]
+    rows = [{**r, "source": r.get("source") or source_record(root / r["work_dir"], r["key"])} for r in previous if r.get("ok")]
     for n, (i, e) in enumerate(chosen):
         if n:
             time.sleep(args.sleep)
