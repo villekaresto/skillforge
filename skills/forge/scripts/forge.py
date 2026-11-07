@@ -59,7 +59,8 @@ def today() -> str:
 def render_skill_md(d: dict) -> str:
     name = d["name"]
     desc = d["description"].replace("\n", " ").strip()
-    out = ["---", f"name: {d['slug']}", f"description: {desc}", "---", "", f"# {name}", ""]
+    # JSON strings are valid YAML scalars: quoting keeps ': ', '#', quotes and leading '-' or '[' from breaking frontmatter.
+    out = ["---", f"name: {d['slug']}", f"description: {json.dumps(desc, ensure_ascii=False)}", "---", "", f"# {name}", ""]
     if d.get("summary"):
         out += [d["summary"].strip(), ""]
     if d.get("when_to_use"):

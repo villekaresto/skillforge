@@ -165,3 +165,21 @@ def test_env_file_settings(tmp_path, monkeypatch):
     assert ingest.setting("GEMINI_API_KEY") == "abc"
     assert ingest.setting("SKILLFORGE_WHISPER_MODEL") == "medium"
     assert ingest.setting("NOPE") is None
+
+
+def test_frontmatter_description_is_quoted_yaml(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = distilled()
+    d["description"] = 'Reconcile banks in ERP: match lines, #tags, "quotes" - use for \'reconcile\''
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    r = run_forge([str(f), "--dry-run"], env)
+    assert r.returncode == 0, r.stderr
+    line = next(l for l in r.stdout.splitlines() if l.startswith("description: "))
+    assert json.loads(line[len("description: "):]) == d["description"]
+    try:
+        import yaml
+    except ImportError:
+        return
+    front = r.stdout.split("---")[1]
+    assert yaml.safe_load(front)["description"] == d["description"]
