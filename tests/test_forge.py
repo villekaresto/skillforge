@@ -219,3 +219,24 @@ def test_reused_out_dir_drops_previous_evidence(tmp_path):
         (tmp_path / name).write_text("stale")
     ingest.clear_stale(tmp_path)
     assert not list(tmp_path.iterdir())
+
+
+def test_caption_download_failure_is_reported_not_swallowed():
+    r = subprocess.CompletedProcess([], 1, "", "[info] Writing video subtitles to: x.en.vtt\n"
+                                              "ERROR: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests\n")
+    assert "429" in ingest.caption_failure(r)
+    assert ingest.caption_failure(subprocess.CompletedProcess([], 0, "", "")) is None
+
+
+def test_whisper_helper_decodes_with_ffmpeg_not_pyav(tmp_path):
+    import shutil
+    numpy = __import__("pytest").importorskip("numpy")
+    if not shutil.which("ffmpeg"):
+        __import__("pytest").skip("ffmpeg missing")
+    sys.path.insert(0, str(INGEST.parent))
+    import whisper_local
+    wav = tmp_path / "tone.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-ar", "44100", str(wav)], check=True)
+    audio = whisper_local.load_audio(str(wav))
+    assert audio.dtype == numpy.float32 and 15000 < len(audio) < 17000
+    assert "av<" not in INGEST.read_text(), "pinning PyAV forces source builds on platforms without wheels"

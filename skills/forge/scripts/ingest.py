@@ -64,6 +64,12 @@ def run(cmd: list, timeout: int | None = None) -> subprocess.CompletedProcess:
     return subprocess.run([str(c) for c in cmd], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
 
+def tail(text: str, lines: int = 4, limit: int = 600) -> str:
+    """The last few non-empty lines of a tool's stderr: the cause is rarely on the very last line."""
+    kept = [l.strip() for l in text.splitlines() if l.strip()][-lines:]
+    return " | ".join(kept)[-limit:]
+
+
 def hms(seconds: float) -> str:
     seconds = max(0, int(seconds))
     h, rem = divmod(seconds, 3600)
@@ -187,7 +193,14 @@ def playlist_entries(url: str, auth: list[str]) -> dict:
             "next": "This is a playlist. Ingest each entry URL separately (one work dir each), then judge and merge per task."}
 
 
-def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dict, list[dict], str | None]:
+def caption_failure(r: subprocess.CompletedProcess) -> str | None:
+    """yt-dlp exits non-zero but still writes info.json when only the subtitle download fails (often HTTP 429)."""
+    if r.returncode and re.search(r"Unable to download (?:video )?subtitles|HTTP Error \d+", r.stderr):
+        return tail(r.stderr, lines=2, limit=300)
+    return None
+
+
+def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dict, list[dict], str | None, list[str]]:
     base = ytdlp_base(auth) + ["--skip-download", "--write-info-json", "--sub-format", "vtt/srt/best",
                                "--sub-langs", f"{lang},{lang}-*,{lang}.*", "-o", str(out / "media.%(ext)s"), url]
     # Pass 1: manual captions only, so provenance is certain.
@@ -199,10 +212,21 @@ def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dic
     info = json.loads(info_files[0].read_text(encoding="utf-8"))
     subs = sorted(out.glob("media*.vtt")) + sorted(out.glob("media*.srt"))
     provenance = "manual" if subs else None
+    errors: list[str] = []
+    if not subs and (fail := caption_failure(r)):
+        errors.append(f"captions: {fail}")
     if not subs:
         r = ytdlp_with_retry([*base, "--write-auto-subs"], "auto captions")
+        if r.returncode and "429" in r.stderr:
+            log("auto captions: HTTP 429 from YouTube, waiting 30 s and trying once more")
+            time.sleep(30)
+            r = run([*base, "--write-auto-subs"], timeout=600)
         subs = sorted(out.glob("media*.vtt")) + sorted(out.glob("media*.srt"))
         provenance = "auto" if subs else None
+        if not subs and (fail := caption_failure(r)):
+            errors.append(f"auto captions: {fail}")
+    for e in errors if not subs else []:
+        log(e)
     meta = {
         "url": info.get("webpage_url") or url, "id": info.get("id"), "title": info.get("title"),
         "uploader": info.get("uploader") or info.get("channel"), "duration": info.get("duration"),
@@ -212,7 +236,7 @@ def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dic
         "tags": (info.get("tags") or [])[:30], "language": info.get("language"),
     }
     segs = parse_vtt(max(subs, key=lambda p: p.stat().st_size).read_text(encoding="utf-8", errors="replace")) if subs else []
-    return meta, segs, provenance
+    return meta, segs, provenance, (errors if not subs else [])
 
 
 def local_metadata(path: Path) -> dict:
@@ -324,7 +348,7 @@ def local_available() -> bool:
 
 def transcribe_local(audio: Path, language: str | None) -> list[dict]:
     helper = Path(__file__).with_name("whisper_local.py")
-    cmd = [need("uv"), "run", "--quiet", "--with", "faster-whisper>=1.1", "--with", "av<15", "--python", "3.12", str(helper), str(audio),
+    cmd = [need("uv"), "run", "--quiet", "--with", "faster-whisper>=1.1", "--python", "3.12", str(helper), str(audio),
            "--model", WHISPER_MODEL]
     if language:
         cmd += ["--language", language]
@@ -471,7 +495,7 @@ def main() -> None:
         print(json.dumps(listing, indent=2, ensure_ascii=False))
         return
     else:
-        meta, segs, provenance = fetch_captions(src, out, args.lang, auth)
+        meta, segs, provenance, caption_errors = fetch_captions(src, out, args.lang, auth)
     meta["ingested_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     meta["slug_hint"] = slugify(meta.get("title"))
 
@@ -491,7 +515,7 @@ def main() -> None:
     if watch and not key:
         die("--engine gemini needs GEMINI_API_KEY (env or ~/.skillforge/.env). Free key: https://aistudio.google.com/apikey")
 
-    errors: list[str] = []
+    errors: list[str] = [] if local else list(caption_errors)
     frames: list[dict] = []
     if transcribe or watch or args.frames:
         if media is None:
@@ -516,7 +540,7 @@ def main() -> None:
                 segs = transcribe_local(audio(), meta.get("language") or (args.lang if args.lang != "en" else None))
                 provenance = "local-whisper"
             except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
-                errors.append(f"local transcription: {str(exc).splitlines()[-1][:300]}")
+                errors.append(f"local transcription: {tail(str(exc))}")
                 log(errors[-1])
                 if key:
                     log("falling back to Gemini transcription because a key is available")
