@@ -119,8 +119,9 @@ It ingests each entry into `<playlist dir>/NN-<id>/`, pacing requests, and write
 
 1. Tell the user the count; for a long playlist, ingest only the entries whose titles promise a procedure unless they ask for all.
 2. Study every entry as usual (all of each transcript, the frames).
-3. Fix the clusters: one cluster per TASK. Split a cluster that mixes tasks; join videos the helper missed; drop entries that are not skill-worthy (each gets its own distilled.json as a note; videos on the same topic share the note slug, so one note file per topic, never one for the whole playlist).
+3. Fix the clusters: one cluster per TASK. Split a cluster that mixes tasks; join videos the helper missed; drop entries that are not skill-worthy (each gets its own distilled.json as a note; videos on the same topic share the note slug, so one note file per topic, never one for the whole playlist). Topic slugs are broad nouns (`docker`, `git-basics`, `ERP-accounting`), not video titles; `forge.py --list` shows the existing `note_topics`.
 4. For each skill-worthy cluster write `<playlist dir>/<slug>.distilled.json` with `"sources"`: copy each entry's `source` record from `playlist.json` and add its `useless_frames`. Give claims a `source` when they come from one video and `refs` on every step that names the videos showing it. If the slug already exists as a skill, merge into it as usual.
+   A cluster whose videos fail the bar together can still contain one video that clears it alone: forge that one as a single-source skill. When an entry joins a cluster, rename its own `distilled.json` (e.g. `distilled.superseded.json`): forge.py refuses a run in which one video appears in two files. Each `sources[]` item may carry its own `confidence`.
 5. One combined dry-run over everything: `python3 scripts/forge.py <playlist dir>/*.distilled.json <note files> --dry-run`. Show it, then write with the same command without `--dry-run`.
 
 Give a one-line verdict per video and per cluster at the end.

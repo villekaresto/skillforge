@@ -17,6 +17,7 @@ Only the standard library. External tools: yt-dlp (URLs), ffmpeg/ffprobe (frames
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import datetime as dt
 import hashlib
 import json
@@ -244,6 +245,18 @@ def caption_passes(base: list[str], out: Path) -> tuple[list[Path], str | None, 
 
 
 
+MUSIC_ONLY = "captions are mostly [Music]/[Applause] or noise: the video probably has no narration; the frames are the evidence (use --frames)."
+
+
+def non_speech_share(segs: list[dict]) -> float:
+    """Share of caption segments that are only a sound tag ([Music], [Música], ♪) or a one-word filler loop."""
+    tag = re.compile(r"^\W*(\[[^\]]*\]|♪+|\(\w+\))\W*$")
+    words = [s["text"].strip().lower() for s in segs]
+    filler = Counter(w for w in words if len(w.split()) <= 2)
+    loops = {w for w, n in filler.items() if n >= max(5, len(words) // 10)}
+    return sum(1 for w in words if tag.match(w) or w in loops) / max(len(words), 1)
+
+
 def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dict, list[dict], str | None, list[str]]:
     tail_args = ["--skip-download", "--write-info-json", "--sub-format", "vtt/srt/best",
                  "--sub-langs", f"{lang},{lang}-*,{lang}.*", "-o", str(out / "media.%(ext)s")]
@@ -282,6 +295,9 @@ def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dic
         "tags": (info.get("tags") or [])[:30], "language": info.get("language"),
     }
     segs = parse_vtt(pick_subtitle(subs, lang).read_text(encoding="utf-8", errors="replace")) if subs else []
+    if segs and non_speech_share(segs) > 0.6:
+        errors.append(MUSIC_ONLY)
+        log(MUSIC_ONLY)
     return meta, segs, provenance, (errors if not subs else [])
 
 

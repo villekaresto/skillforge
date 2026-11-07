@@ -736,3 +736,35 @@ def test_playlist_manifest_source_record_is_copy_ready(tmp_path):
     rec = playlist.source_record(tmp_path / "03-abc", "03-abc")
     assert rec == {"url": "https://y/watch?v=abc", "id": "abc", "title": "T", "uploader": "U", "duration": 258,
                    "ingested_at": "2026-11-07T10:00:00+00:00", "work_dir": "03-abc"}
+
+
+def test_combined_dry_run_shows_second_note_on_a_topic_as_append(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    for name, url in (("a.json", "https://e/v/1"), ("b.json", "https://e/v/2")):
+        d = distilled(url=url, worthy=False)
+        d["slug"] = "shared-topic"
+        (tmp_path / name).write_text(json.dumps(d))
+    out = run_forge([str(tmp_path / "a.json"), str(tmp_path / "b.json"), "--dry-run"], env).stdout
+    assert "would create learning note" in out and "would append to learning note" in out
+
+
+def test_one_video_cannot_be_in_two_files_of_one_run(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    (tmp_path / "a.json").write_text(json.dumps(distilled()))
+    (tmp_path / "b.json").write_text(json.dumps(distilled(worthy=False)))
+    r = run_forge([str(tmp_path / "a.json"), str(tmp_path / "b.json"), "--dry-run"], env)
+    assert r.returncode == 2 and "appears in both" in r.stderr
+
+
+def test_list_shows_note_topics(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    (tmp_path / "home" / "notes").mkdir(parents=True)
+    (tmp_path / "home" / "notes" / "docker.md").write_text("x")
+    assert json.loads(run_forge(["--list"], env).stdout)["note_topics"] == ["docker"]
+
+
+def test_music_only_captions_are_flagged():
+    music = [{"start": i, "end": i + 1, "text": t} for i, t in enumerate(["[Music]"] * 8 + ["Heat. Heat."] * 6 + ["hello there everyone"])]
+    assert ingest.non_speech_share(music) > 0.9
+    speech = [{"start": i, "end": i + 1, "text": f"step {i} open the menu"} for i in range(20)] + [{"start": 30, "end": 31, "text": "[Music]"}]
+    assert ingest.non_speech_share(speech) < 0.1

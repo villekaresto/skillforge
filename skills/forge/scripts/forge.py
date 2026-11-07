@@ -238,7 +238,7 @@ def render_note(d: dict, src: dict) -> str:
     if d.get("verification"):
         out += ["### How to check", *[f"- {v}" for v in d["verification"]], ""]
     if d.get("commands"):
-        out += ["### Commands shown (transcribed, review before running)"]
+        out += ["### Commands (as shown or spoken in the source; review before running)"]
         for c in d["commands"]:
             out += [f"{c.get('description', 'command')} _({c.get('timestamp', '')})_", "", "```" + (c.get("language") or ""),
                     c["command"].rstrip(), "```", ""]
@@ -384,7 +384,9 @@ def public(src: dict) -> dict:
     return {k: v for k, v in src.items() if not k.startswith("_")}
 
 
-def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | None = None) -> None:
+def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | None = None, pending: dict | None = None) -> None:
+    """`pending` carries note texts produced earlier in the same dry-run, so a combined dry-run shows a second note on
+    a topic as an append, exactly as the real write will."""
     validate(d)
     incoming = incoming_sources(d, work_dir)
     cat = load_catalog()
@@ -395,7 +397,10 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
         # One file per topic slug; each source is a dated section, replaced when the same source is re-studied.
         path = NOTES_DIR / f"{slug}.md"
         section = render_note(d, src)
-        text, action = upsert_note(path.read_text(encoding="utf-8") if path.is_file() else None, slug, src["url"], section)
+        current = (pending or {}).get(path, path.read_text(encoding="utf-8") if path.is_file() else None)
+        text, action = upsert_note(current, slug, src["url"], section)
+        if pending is not None:
+            pending[path] = text
         if dry_run:
             verb = {"create": "would create", "update": "would update this source's section in", "append": "would append to"}[action]
             print(f"# {verb} learning note {path}\n\n{section}")
@@ -498,6 +503,8 @@ def main() -> None:
     a = ap.parse_args()
     if a.list:
         cat = load_catalog()
+        # Note topics are the slugs to reuse when a new video is on the same subject; legacy per-video notes included.
+        cat["note_topics"] = sorted(p.stem for p in NOTES_DIR.glob("*.md")) if NOTES_DIR.is_dir() else []
         print(json.dumps(cat, indent=2, ensure_ascii=False))
         return
     if a.show:
@@ -508,11 +515,19 @@ def main() -> None:
         return
     if not a.distilled:
         ap.error("distilled JSON path required")
-    for i, name in enumerate(a.distilled):
-        path = Path(name)
+    docs = [(Path(n), json.loads(Path(n).read_text(encoding="utf-8"))) for n in a.distilled]
+    seen: dict = {}
+    for path, d in docs:                  # a video in a cluster file and in its own note file would be forged twice
+        for src in (d.get("sources") or [d.get("source") or {}]):
+            if src.get("url") in seen:
+                die(f"{src['url']} appears in both {seen[src['url']]} and {path}; a video belongs to one distilled.json "
+                    f"(rename the other, e.g. distilled.superseded.json)")
+            seen[src.get("url")] = path
+    pending: dict = {}
+    for i, (path, d) in enumerate(docs):
         if len(a.distilled) > 1:
             print(f"{chr(10) if i else ''}======== {path} ========")
-        forge(json.loads(path.read_text(encoding="utf-8")), a.dry_run, a.allow_drop, work_dir=path.resolve().parent)
+        forge(d, a.dry_run, a.allow_drop, work_dir=path.resolve().parent, pending=pending)
 
 
 if __name__ == "__main__":
