@@ -65,6 +65,10 @@ Captions and metadata are fetched by yt-dlp on your machine. Local transcription
 
 Robustness built in: one automatic retry with alternate YouTube clients on 403/signature failures, a wait-and-retry on caption rate limits (HTTP 429) with automatic fallback to local transcription, the original caption track preferred over YouTube's machine translations, playlist URLs listed instead of half-ingested, stale-file clearing when a work dir is reused, FFmpeg `-fps_mode`/`-vsync` detection for old and new builds, manual-vs-auto caption provenance, and frames sampled after transitions settle, spread over time, with blank and near-duplicate frames removed. Re-forging the same source is a no-op.
 
+## Tested on 60 real sources
+
+v0.1.2 was run unattended over 60 real sources: ERP tutorials, developer screen recordings, wordless craft videos, business frameworks, 3–5 hour podcasts, non-English and caption-less videos, shorts, a TikTok and a playlist. The run produced 9 skills (3 merged from several videos) and 45 notes, rejected all 6 deliberately useless sources, and drove 22 fixes. Counts, every commit, the remaining weaknesses and the best and worst skills are in [docs/qa/FINDINGS.md](docs/qa/FINDINGS.md); one entry per source is in [docs/qa/results.md](docs/qa/results.md).
+
 ## Development
 
 ```

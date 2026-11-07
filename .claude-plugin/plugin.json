@@ -1,6 +1,6 @@
 {
   "name": "forge",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Learn from any video or podcast and forge a Claude Code skill from it when it deserves one.",
   "author": { "name": "skillforge contributors", "url": "https://github.com/villekaresto/skillforge" },
   "homepage": "https://github.com/villekaresto/skillforge",
