@@ -831,3 +831,15 @@ def test_rewrite_without_evidence_keeps_frames_already_in_references(tmp_path, m
     refs = tmp_path / "skills" / "demo-task" / "references"
     assert (refs / "frames" / "abc" / "001_0-10.jpg").is_file()
     assert "frames/abc/001_0-10.jpg" in (refs / "source-abc.md").read_text()
+
+
+def test_section_parsing_and_frame_offsets(tmp_path):
+    import shutil
+    assert ingest.parse_section("1:17:00-1:37:30") == (4620.0, 5850.0)
+    assert ingest.parse_section("90-120") == (90.0, 120.0)
+    if not shutil.which("ffmpeg"):
+        return
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x240:d=10:r=25", str(video)], check=True)
+    frames = ingest.extract_frames(video, tmp_path, max_frames=4, duration=10.0, width=320, no_dedup=True, offset=4620.0)
+    assert frames and all(f["time"] >= 4620 for f in frames) and frames[0]["stamp"].startswith("1:17:")

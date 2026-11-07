@@ -325,9 +325,12 @@ def video_format(frame_width: int) -> str:
     return f"bv*[height<={h}][fps<=30]+ba/bv*[height<={h}]+ba/b[height<={h}]/b"
 
 
-def download_media(url: str, out: Path, audio_only: bool, auth: list[str], frame_width: int = 768) -> Path:
+def download_media(url: str, out: Path, audio_only: bool, auth: list[str], frame_width: int = 768,
+                   section: tuple[float, float] | None = None) -> Path:
     fmt = ["-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a"] if audio_only else \
           ["-f", video_format(frame_width), "--merge-output-format", "mp4"]
+    if section:
+        fmt += ["--download-sections", f"*{section[0]:.0f}-{section[1]:.0f}"]
     r = ytdlp_with_retry([*ytdlp_base(auth), *fmt, "-o", str(out / "media.%(ext)s"), url], "download")
     files = [p for p in out.glob("media.*") if p.suffix.lower() in AUDIO_EXT | VIDEO_EXT and not p.name.endswith(".part")]
     if r.returncode or not files:
@@ -418,7 +421,20 @@ def settle_times(stamps: list[float], duration: float | None, gap: float = 1.0, 
     return [min(t, limit) if limit else t for t in out]
 
 
-def extract_frames(video: Path, out: Path, max_frames: int, duration: float | None, width: int, no_dedup: bool) -> list[dict]:
+def parse_section(text: str) -> tuple[float, float]:
+    """'1:17:00-1:37:30' -> (4620.0, 5850.0). Each side is H:MM:SS, M:SS or seconds."""
+    m = re.fullmatch(r"\s*([\d:.]+)\s*-\s*([\d:.]+)\s*", text or "")
+    if not m:
+        die(f"--section wants START-END like 1:17:00-1:37:00, got {text!r}")
+    start, end = to_sec(m.group(1)), to_sec(m.group(2))
+    if end <= start:
+        die(f"--section end must be after start: {text!r}")
+    return start, end
+
+
+def extract_frames(video: Path, out: Path, max_frames: int, duration: float | None, width: int, no_dedup: bool,
+                   offset: float = 0.0) -> list[dict]:
+    """`offset` is where `video` starts inside the source (a --section download), so stamps match the transcript."""
     """Scene changes (threshold 0.2) plus a uniform pass, merged by time, near-duplicates removed, thinned to the cap.
     The uniform pass guarantees coverage of slow screen recordings where typing never trips the scene detector."""
     ffmpeg = need("ffmpeg")
@@ -462,6 +478,7 @@ def extract_frames(video: Path, out: Path, max_frames: int, duration: float | No
         pairs = kept
     result = []
     for i, (f, t) in enumerate(pairs, 1):
+        t += offset
         new = frames_dir / f"{i:03d}_{hms(t).replace(':', '-')}.jpg"
         f.rename(new)
         result.append({"index": i, "time": round(t, 2), "stamp": hms(t), "path": str(new)})
@@ -626,6 +643,7 @@ def main() -> None:
                     help="Transcription when there are no captions. gemini also WATCHES the whole video.")
     ap.add_argument("--frames", type=int, nargs="?", const=40, default=0, metavar="N", help="Extract up to N keyframes (default 40)")
     ap.add_argument("--resolution", type=int, default=768, help="Max frame width in px (default 768; 1280 for on-screen text)")
+    ap.add_argument("--section", metavar="START-END", help="frames from this part only, e.g. 1:17:00-1:37:00 (long webinars, streams)")
     ap.add_argument("--no-dedup", action="store_true", help="Keep near-duplicate frames")
     ap.add_argument("--lang", default="en", help="Preferred caption language (default en); also forces Whisper's language")
     ap.add_argument("--cookies", metavar="FILE", help="Netscape cookie file for private sources")
@@ -684,17 +702,23 @@ def main() -> None:
     if watch and not key:
         die("--engine gemini needs GEMINI_API_KEY (env or ~/.skillforge/.env). Free key: https://aistudio.google.com/apikey")
 
+    section: tuple[float, float] | None = None
     errors: list[str] = [] if local else list(caption_errors)
     whisper_backend: str | None = None
     frames: list[dict] = []
     if transcribe or watch or args.frames:
         if media is None:
-            media = download_media(src, out, not (watch or args.frames), auth, args.resolution if not watch else 1280)
+            # A section download only serves frames: transcription and Gemini need the whole recording.
+            section = parse_section(args.section) if args.section and args.frames and not transcribe and not watch else None
+            if args.section and not section:
+                log("--section ignored: this run also transcribes or watches the whole video")
+            media = download_media(src, out, not (watch or args.frames), auth, args.resolution if not watch else 1280, section)
         is_video = media.suffix.lower() in VIDEO_EXT
 
         if args.frames:                                    # frames first: they must survive a transcription failure
             if is_video:
-                frames = extract_frames(media, out, args.frames, meta.get("duration"), args.resolution, args.no_dedup)
+                frames = extract_frames(media, out, args.frames, (section[1] - section[0]) if section else meta.get("duration"),
+                                        args.resolution, args.no_dedup, offset=section[0] if section else 0.0)
             else:
                 log("--frames ignored: source is audio only")
 
