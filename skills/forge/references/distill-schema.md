@@ -56,6 +56,9 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
 - `procedure[].refs` (optional, merges): a step shown in more than one source lists each one,
   `"refs": [{"source": "<id>", "timestamp": "0:43"}, {"source": "<other id>", "timestamp": "0:38"}]`, rendered `(S1 0:43; S2 0:38)`.
   Use it instead of writing source names into `timestamp`.
+- `useless_frames` (optional): indexes (the `NNN` in `NNN_H-MM-SS.jpg`) of frames that carry nothing: blank, loading screens,
+  talking head only, intro/outro cards, near-duplicates. forge.py copies every other frame of this source into
+  `references/frames/<source id>/` and links them from that source's notes. Recorded per source; it never changes the skill's content.
 - `verdict.confidence` on a merge is your confidence in the merged skill, and is also recorded as the new source's confidence.
 - `commands[].command` verbatim from the source. No invented flags.
 - On a merge, `sources` is managed by forge.py; still pass the single new `source`.

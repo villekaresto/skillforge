@@ -76,6 +76,7 @@ Write `distilled.json` into `work_dir` following `references/distill-schema.md`.
 - Non-English source: write the skill in English, but keep on-screen UI labels in the source language with the English equivalent in parentheses, because that is what the user will click. If labels came only from speech (no frames), say so under `contestable`.
 - Commands go in `commands` exactly as shown. A command that is only spoken, never shown, may go in with `(spoken, not shown)` in its description; never complete or "fix" a command from your own knowledge. Never write commands into executable scripts; forge.py puts them in `references/commands.md`.
 - Merging: if the slug exists, load the stored JSON with `--show`, and produce a merged `distilled.json` that keeps everything still valid from the old version, integrates the new source, and lists disagreements under `contestable` with both timestamps. Never silently overwrite a step with a contradicting one. A step both sources show gets `refs` with each source's timestamp; do not write source names into `timestamp`. forge.py refuses an update that drops steps another source backs, and re-forging a source with unchanged content is a no-op (no new version).
+- `useless_frames`: list the indexes of frames you viewed that show nothing useful (blank, loading, talking head, intro/outro). The rest are copied into the skill's references as visual evidence.
 - `apply_to_me`: 2–4 concrete things worth trying given what you know about the user's work. Skip if you know nothing.
 
 ### 5. Forge

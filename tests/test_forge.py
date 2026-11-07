@@ -478,3 +478,33 @@ def test_info_json_is_cached_per_video_and_reused(tmp_path, monkeypatch):
         f.unlink()
     ingest.fetch_captions("https://youtu.be/abcdefghijk", out, "en", [])     # same video, other URL form
     assert "--load-info-json" in fake.calls[-1] and url not in fake.calls[-1]
+
+
+def test_useless_frames_are_left_out_of_references(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    work = tmp_path / "work"
+    (work / "frames").mkdir(parents=True)
+    frames = []
+    for i, stamp in [(1, "0-10"), (2, "0-20"), (3, "0-30")]:
+        name = f"{i:03d}_{stamp}.jpg"
+        (work / "frames" / name).write_bytes(b"jpg")
+        frames.append({"index": i, "time": i * 10, "stamp": stamp.replace("-", ":"), "path": f"/elsewhere/frames/{name}"})
+    (work / "source.json").write_text(json.dumps({"frames": frames}))
+    d = distilled()
+    d["useless_frames"] = [2]
+    (work / "distilled.json").write_text(json.dumps(d))
+    r = run_forge([str(work / "distilled.json"), "--dry-run"], env)
+    assert "2 frames to references, 1 marked useless" in r.stdout
+    assert run_forge([str(work / "distilled.json")], env).returncode == 0
+    refs = tmp_path / "skills" / "demo-task" / "references"
+    assert sorted(p.name for p in (refs / "frames" / "abc").iterdir()) == ["001_0-10.jpg", "003_0-30.jpg"]
+    notes = (refs / "source-abc.md").read_text()
+    assert "frames/abc/003_0-30.jpg" in notes and "002_0-20" not in notes
+    stored = json.loads((tmp_path / "skills" / "demo-task" / ".forge" / "skill.json").read_text())
+    assert "useless_frames" not in stored and stored["sources"][0]["useless_frames"] == [2]
+
+    d["useless_frames"] = [1, 2]                              # re-study changes only the frame verdicts
+    (work / "distilled.json").write_text(json.dumps(d))
+    r = run_forge([str(work / "distilled.json")], env)
+    assert json.loads(r.stdout)["written"] == "unchanged"
+    assert [p.name for p in (refs / "frames" / "abc").iterdir()] == ["003_0-30.jpg"]

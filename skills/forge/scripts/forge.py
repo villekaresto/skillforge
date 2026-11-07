@@ -17,6 +17,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -141,7 +142,27 @@ def attribute_steps(procedure: list[dict], old: dict | None, new_src: dict) -> l
     return out
 
 
-def render_source_notes(d: dict, src: dict) -> str:
+def source_frames(work_dir: Path | None, useless: set) -> tuple[list[dict], int]:
+    """Frames ingest kept for this source (from work_dir/source.json), minus the ones Claude marked useless."""
+    meta = (work_dir / "source.json") if work_dir else None
+    if not meta or not meta.is_file():
+        return [], 0
+    kept, omitted = [], 0
+    for f in json.loads(meta.read_text(encoding="utf-8")).get("frames") or []:
+        if f.get("index") in useless:
+            omitted += 1
+            continue
+        path = work_dir / "frames" / Path(f["path"]).name
+        if path.is_file():
+            kept.append({**f, "file": path})
+    return kept, omitted
+
+
+def source_key(src: dict) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (src.get("id") or src["url"]).lower()).strip("-")[:40]
+
+
+def render_source_notes(d: dict, src: dict, frames: list[str] | None = None) -> str:
     out = [f"# Source notes: {src.get('title') or src['url']}", "", f"- URL: {src['url']}", f"- By: {src.get('uploader') or 'unknown'}",
            f"- Ingested: {src['ingested_at']}", f"- Verdict: {d['verdict']['reason']}", ""]
     if d.get("key_claims"):
@@ -152,6 +173,9 @@ def render_source_notes(d: dict, src: dict) -> str:
         out += ["## Contestable or unverified", *[f"- {c}" for c in d["contestable"]], ""]
     if d.get("apply_to_me"):
         out += ["## Worth trying in my context", *[f"- {a}" for a in d["apply_to_me"]], ""]
+    if frames:
+        out += ["## Frames", "Keyframes from the source, by timestamp. Frames marked useless (blank, talking head, intro) are left out.", "",
+                *frames, ""]
     return "\n".join(out) + "\n"
 
 
@@ -223,9 +247,14 @@ def dropped_steps(existing: dict | None, procedure: list[dict], incoming: dict) 
     return lost
 
 
-def forge(d: dict, dry_run: bool, allow_drop: bool = False) -> None:
+def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | None = None) -> None:
     validate(d)
+    useless = d.get("useless_frames") or []
+    if not isinstance(useless, list) or not all(isinstance(i, int) for i in useless):
+        die("useless_frames must be a list of frame indexes (integers)")
     src = dict(d["source"])
+    if useless:
+        src["useless_frames"] = sorted(set(useless))
     src.setdefault("ingested_at", dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"))
     src["confidence"] = d["verdict"].get("confidence")
     cat = load_catalog()
@@ -261,8 +290,11 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False) -> None:
     new_source = not any(s["url"] == src["url"] for s in sources)
     if new_source:
         sources.append(src)
+    else:                                        # same source re-studied: its frame verdicts may have changed
+        sources = [{**s, "useless_frames": src["useless_frames"]} if s["url"] == src["url"] and "useless_frames" in src
+                   else s for s in sources]
     # Re-forging the same source with the same content re-renders the files but is not a new version.
-    content = {k: v for k, v in d.items() if k != "source"}
+    content = {k: v for k, v in d.items() if k not in ("source", "useless_frames")}   # frame verdicts belong to the source
     lost = dropped_steps(existing, content.get("procedure", []), src)
     if lost and not allow_drop:
         die(f"this would drop {len(lost)} step(s) that other sources of '{slug}' back: {lost[:5]}. "
@@ -277,17 +309,27 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False) -> None:
     action = "create" if not existing else "update" if changed else "unchanged"
 
     skill_md = render_skill_md(merged)
+    frames, omitted = source_frames(work_dir, set(useless))
     if dry_run:
         verb = {"create": "would create", "update": "would update", "unchanged": "unchanged, would re-render"}[action]
-        print(f"# {verb} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)})\n")
+        print(f"# {verb} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)}; "
+              f"{len(frames)} frames to references, {omitted} marked useless)\n")
         print(skill_md)
         return
 
     (skill_dir / "references").mkdir(parents=True, exist_ok=True)
     (skill_dir / ".forge").mkdir(exist_ok=True)
     (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
-    note_name = f"source-{re.sub(r'[^a-z0-9]+', '-', (src.get('id') or src['url']).lower()).strip('-')[:40]}.md"
-    (skill_dir / "references" / note_name).write_text(render_source_notes(merged, src), encoding="utf-8")
+    key = source_key(src)
+    frame_dir = skill_dir / "references" / "frames" / key
+    shutil.rmtree(frame_dir, ignore_errors=True)
+    links = []
+    if frames:
+        frame_dir.mkdir(parents=True)
+        for f in frames:
+            shutil.copyfile(f["file"], frame_dir / f["file"].name)
+            links.append(f"- [{f.get('stamp', '')}](frames/{key}/{f['file'].name})")
+    (skill_dir / "references" / f"source-{key}.md").write_text(render_source_notes(merged, src, links), encoding="utf-8")
     if merged.get("commands"):
         (skill_dir / "references" / "commands.md").write_text(render_commands(merged), encoding="utf-8")
     store.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -319,7 +361,8 @@ def main() -> None:
         return
     if not a.distilled:
         ap.error("distilled JSON path required")
-    forge(json.loads(Path(a.distilled).read_text(encoding="utf-8")), a.dry_run, a.allow_drop)
+    path = Path(a.distilled)
+    forge(json.loads(path.read_text(encoding="utf-8")), a.dry_run, a.allow_drop, work_dir=path.resolve().parent)
 
 
 if __name__ == "__main__":
