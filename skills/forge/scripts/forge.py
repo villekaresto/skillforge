@@ -358,6 +358,12 @@ def lint(d: dict, skill_md: str) -> list[str]:
         text = item_text(p)
         if "→" not in text and "->" not in text:
             out.append(f"pitfall does not lead with the symptom ('symptom → cause → fix'): {text[:60]!r}")
+    demo = re.compile(r"\b(demo|the presenter|in the video)\b", re.I)
+    leaks = [f"step {i}" for i, st in enumerate(steps, 1) if demo.search(st.get("step", "") + " " + st.get("detail", ""))]
+    leaks += [f"prerequisite {i}" for i, p in enumerate(d.get("prerequisites") or [], 1) if demo.search(p)]
+    leaks += [f"verification {i}" for i, v in enumerate(d.get("verification") or [], 1) if demo.search(v)]
+    if leaks:
+        out.append(f"demo values in {', '.join(leaks[:5])}: use placeholders, put the presenter's values in key_claims")
     if d.get("procedure") and not d.get("verification"):
         out.append("no verification: add at least one check the user can see (a field value, a chatter line, a count)")
     return out

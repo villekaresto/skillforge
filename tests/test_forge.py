@@ -858,3 +858,14 @@ def test_bare_media_url_keeps_the_given_url():
     src = INGEST.read_text()
     assert 'url if info.get("extractor_key") == "Generic"' in src
     assert 'meta["duration"] = local_metadata(media).get("duration")' in src
+
+
+def test_lint_flags_demo_values_in_instructions(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = distilled()
+    d["procedure"][1]["detail"] = "Set the margin (the demo uses 15%)"
+    d["verification"] = ["Check it"]
+    d["pitfalls"] = ["Nothing happens → wrong field → set it"]
+    (tmp_path / "d.json").write_text(json.dumps(d))
+    out = run_forge([str(tmp_path / "d.json"), "--dry-run"], env).stdout
+    assert "# lint: demo values in step 2" in out
