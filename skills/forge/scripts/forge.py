@@ -170,6 +170,10 @@ def render_note(d: dict, src: dict) -> str:
     if d.get("procedure"):
         out += ["## Steps shown (not forged as a skill)",
                 *[f"{i}. {st['step']}" + (f" ({st['timestamp']})" if st.get("timestamp") else "") for i, st in enumerate(d["procedure"], 1)], ""]
+    if d.get("pitfalls"):
+        out += ["## Pitfalls", *[f"- {p}" for p in d["pitfalls"]], ""]
+    if d.get("verification"):
+        out += ["## How to check", *[f"- {v}" for v in d["verification"]], ""]
     if d.get("commands"):
         out += ["## Commands shown (transcribed, review before running)"]
         for c in d["commands"]:

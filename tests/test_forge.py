@@ -352,4 +352,4 @@ def test_note_renders_commands(tmp_path, monkeypatch):
     f = tmp_path / "d.json"
     f.write_text(json.dumps(distilled(worthy=False)))
     r = run_forge([str(f), "--dry-run"], env)
-    assert "ls -la" in r.stdout
+    assert "ls -la" in r.stdout and "Watch out" in r.stdout
