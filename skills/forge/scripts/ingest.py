@@ -115,19 +115,27 @@ def to_sec(stamp: str) -> float:
 
 
 def parse_vtt(text: str) -> list[dict]:
-    """Parse WebVTT/SRT into [{start, end, text}], merging YouTube's rolling duplicate cues."""
+    """Parse WebVTT/SRT into [{start, end, text}], merging YouTube's rolling duplicate cues.
+
+    YouTube auto-captions repeat the previous line at the top of every cue and put cue settings
+    (align:start position:0%) after the timing; both are dropped here."""
     segs: list[dict] = []
+    recent: list[str] = []
     ts = r"(?:\d+:)?\d{1,2}:\d{2}[.,]\d{3}"
     ent = {"&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'"}
     for block in re.split(r"\n\s*\n", text.replace("\r", "")):
         m = re.search(rf"({ts})\s*-->\s*({ts})", block)
         if not m:
             continue
-        body = re.sub(r"<[^>]+>", "", block[m.end():])
+        rest = block[m.end():]
+        body = rest.split("\n", 1)[1] if "\n" in rest else ""   # skip cue settings on the timing line
+        body = re.sub(r"<[^>]+>", "", body)
         body = re.sub(r"&[a-z#0-9]+;", lambda x: ent.get(x.group(), x.group()), body)
-        lines = [l.strip() for l in body.splitlines() if l.strip() and not l.strip().isdigit()]
+        lines = [re.sub(r"\s+", " ", l.strip()) for l in body.splitlines() if l.strip() and not l.strip().isdigit()]
+        lines = [l for l in lines if l not in recent[-3:]]   # rolling captions: line already shown in the last cue
         if not lines:
             continue
+        recent += lines
         content = re.sub(r"\s+", " ", " ".join(lines))
         if segs and (content == segs[-1]["text"] or segs[-1]["text"].endswith(content)):
             continue

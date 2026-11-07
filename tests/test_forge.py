@@ -114,6 +114,30 @@ hello there friends
     assert segs[0]["start"] == 1.0 and segs[0]["end"] == 7.0
 
 
+def test_vtt_youtube_auto_captions_drop_cue_settings_and_repeated_lines():
+    vtt = """WEBVTT
+Kind: captions
+
+00:00:00.000 --> 00:00:02.000 align:start position:0%
+hello dear oders
+
+00:00:02.000 --> 00:00:02.010 align:start position:0%
+hello dear oders
+
+
+00:00:02.010 --> 00:00:04.000 align:start position:0%
+hello dear oders
+in<00:00:02.500><c> this</c><00:00:03.000><c> video</c>
+
+00:00:04.000 --> 00:00:06.000 align:start position:0%
+in this video
+we talk about rules
+"""
+    text = " ".join(s["text"] for s in ingest.parse_vtt(vtt))
+    assert "align:" not in text and "position:" not in text
+    assert text == "hello dear oders in this video we talk about rules"
+
+
 def test_gemini_transcript_parsing():
     segs = ingest.parse_gemini_transcript("[0:03] Speaker 1: hi\n[1:02:10] late line\nnoise")
     assert segs[0]["start"] == 3 and segs[1]["start"] == 3730
