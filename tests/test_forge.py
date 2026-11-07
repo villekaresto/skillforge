@@ -1062,3 +1062,13 @@ def test_export_for_chat_has_no_frames_and_no_profile_context(tmp_path, monkeypa
     assert not any("frames" in n for n in z.namelist())
     text = "".join(z.read(n).decode() for n in z.namelist() if n.endswith(".md"))
     assert "Private line" not in text and "Worth trying" not in text and "Key claims" in text
+
+
+def test_a_promotion_and_the_old_note_cannot_share_a_run(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    lens = lens_distilled()
+    lens["supersedes_notes"] = True
+    (tmp_path / "lens.json").write_text(json.dumps(lens))
+    (tmp_path / "note.json").write_text(json.dumps(distilled(url=lens["source"]["url"], worthy=False)))
+    r = run_forge([str(tmp_path / "lens.json"), str(tmp_path / "note.json"), "--dry-run"], env)
+    assert r.returncode == 2 and "supersedes the note" in r.stderr

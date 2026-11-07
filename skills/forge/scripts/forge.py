@@ -776,6 +776,12 @@ def main() -> None:
                 die(f"{src['url']} appears as a {kind} in both {seen[key]} and {path}; a video feeds at most one skill and one "
                     f"note per run (rename the stale file, e.g. distilled.superseded.json)")
             seen[key] = path
+    for path, d in docs:                  # promoting a note while re-filing the same video as a note contradicts itself
+        if d.get("supersedes_notes"):
+            for src in (d.get("sources") or [d.get("source") or {}]):
+                if (src.get("url"), "note") in seen:
+                    die(f"{path} supersedes the note for {src['url']}, but {seen[(src.get('url'), 'note')]} files it as a "
+                        f"note in the same run; leave the old note file out (e.g. rename it distilled.superseded.json)")
     pending: dict = {}
     for i, (path, d) in enumerate(docs):
         if len(a.distilled) > 1:
