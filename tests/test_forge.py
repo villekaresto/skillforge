@@ -748,12 +748,15 @@ def test_combined_dry_run_shows_second_note_on_a_topic_as_append(tmp_path, monke
     assert "would create learning note" in out and "would append to learning note" in out
 
 
-def test_one_video_cannot_be_in_two_files_of_one_run(tmp_path, monkeypatch):
+def test_one_video_feeds_at_most_one_skill_and_one_note_per_run(tmp_path, monkeypatch):
     env = env_for(tmp_path, monkeypatch)
     (tmp_path / "a.json").write_text(json.dumps(distilled()))
     (tmp_path / "b.json").write_text(json.dumps(distilled(worthy=False)))
     r = run_forge([str(tmp_path / "a.json"), str(tmp_path / "b.json"), "--dry-run"], env)
-    assert r.returncode == 2 and "appears in both" in r.stderr
+    assert r.returncode == 0, "a long course may yield a skill and a note"
+    (tmp_path / "c.json").write_text(json.dumps(distilled(worthy=False)))
+    r = run_forge([str(tmp_path / "a.json"), str(tmp_path / "b.json"), str(tmp_path / "c.json"), "--dry-run"], env)
+    assert r.returncode == 2 and "appears as a note in both" in r.stderr
 
 
 def test_list_shows_note_topics(tmp_path, monkeypatch):

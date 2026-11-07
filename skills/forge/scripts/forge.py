@@ -666,13 +666,17 @@ def main() -> None:
     if not a.distilled:
         ap.error("distilled JSON path required")
     docs = [(Path(n), json.loads(Path(n).read_text(encoding="utf-8"))) for n in a.distilled]
+    # A video may feed one skill and one note in a run (a long course: a procedure plus reference material), but not two
+    # skills or two notes: that is a stale solo file left next to a cluster file, and it would be forged twice.
     seen: dict = {}
-    for path, d in docs:                  # a video in a cluster file and in its own note file would be forged twice
+    for path, d in docs:
+        kind = "skill" if (d.get("verdict") or {}).get("skill_worthy") else "note"
         for src in (d.get("sources") or [d.get("source") or {}]):
-            if src.get("url") in seen:
-                die(f"{src['url']} appears in both {seen[src['url']]} and {path}; a video belongs to one distilled.json "
-                    f"(rename the other, e.g. distilled.superseded.json)")
-            seen[src.get("url")] = path
+            key = (src.get("url"), kind)
+            if key in seen:
+                die(f"{src['url']} appears as a {kind} in both {seen[key]} and {path}; a video feeds at most one skill and one "
+                    f"note per run (rename the stale file, e.g. distilled.superseded.json)")
+            seen[key] = path
     pending: dict = {}
     for i, (path, d) in enumerate(docs):
         if len(a.distilled) > 1:
