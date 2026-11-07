@@ -2,7 +2,7 @@
 """Propose topic clusters for a playlist: which videos teach the same task and should become one skill.
 
 Deterministic and standard-library only. Each entry is a dict with `key` and any of `title`, `chapters` (list of str),
-`tags` (list of str), `text` (opening of the transcript). Words that appear in most of the playlist ("ERP", "tutorial")
+`tags` (list of str), `text` (opening of the transcript). Words that appear in most of the playlist (the product name, "tutorial")
 get almost no weight through IDF, so clusters form on what makes videos different. Claude reviews the proposal; it is a
 starting point, not a verdict.
 """

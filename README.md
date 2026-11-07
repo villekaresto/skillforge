@@ -29,10 +29,10 @@ You also need Python 3.10+ and Claude Code. `uv` is optional: it enables private
 **3. Give it a video:**
 
 ```
-/forge https://www.youtube.com/watch?v=1IQB_q-2YW8
+/forge https://www.youtube.com/watch?v=<a 5-15 minute how-to you care about>
 ```
 
-That is ERP's official 5-minute video on Studio automation rules; it forged a skill in testing. Use any tutorial you care about. Claude fetches the captions, reads the whole transcript, decides, and shows you a **dry-run** of the SKILL.md it would write. Say yes, and the skill lands in `~/.claude/skills/<task-name>/`. It is available from the next session; ask Claude about that task and it uses the skill.
+Pick a short tutorial that shows a procedure end to end (a software setting, a database task, a workshop technique). Claude fetches the captions, reads the whole transcript, decides, and shows you a **dry-run** of the SKILL.md it would write. Say yes, and the skill lands in `~/.claude/skills/<task-name>/`. It is available from the next session; ask Claude about that task and it uses the skill.
 
 **4. Try more:**
 
@@ -52,9 +52,9 @@ How the pieces fit is described in [docs/architecture.md](docs/architecture.md).
 
 Two unattended QA batches were run before v0.2:
 
-- **60 everyday sources:** ERP, developer screencasts, wordless craft videos, business frameworks, 3–5 hour podcasts, non-English and caption-less videos, shorts, TikTok.
-- **40 chosen to break things:** a 12-hour livestream, 4-hour courses with chapters, multi-speaker panels, clickbait titles, a 1990s TV broadcast, a deliberately degraded phone recording, Vimeo, direct `.mp3` links, a local `.mov`, and the same procedure in English and foreign-language.
-- **A real 10-video ERP playlist** in playlist mode.
+- **60 everyday sources:** business-software tutorials, developer screencasts, wordless craft videos, business frameworks, 3–5 hour podcasts, non-English and caption-less videos, shorts, TikTok.
+- **40 chosen to break things:** a 12-hour livestream, 4-hour courses with chapters, multi-speaker panels, clickbait titles, a 1990s TV broadcast, a deliberately degraded phone recording, Vimeo, direct `.mp3` links, a local `.mov`, and the same procedure in two languages.
+- **A real 10-video software-tutorial playlist** in playlist mode.
 
 Results, every fix, and the remaining weaknesses are in [docs/qa/FINDINGS.md](docs/qa/FINDINGS.md).
 

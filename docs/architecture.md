@@ -18,7 +18,7 @@ URL / file ─▶ ingest.py ─▶ evidence ─▶ Claude: study ─▶ judge �
 - **Metadata and captions** come from yt-dlp without downloading the video. Manual captions are tried first, so their provenance is certain, then auto captions, preferring the original speech-recognised track over YouTube's machine translations. A failed caption download is retried once after 30 s; `info.json` is cached per video for six hours.
 - **No usable captions?** The audio is downloaded and transcribed on the machine, with mlx-whisper on Apple Silicon and faster-whisper elsewhere. Gemini is used instead if you choose it, and it can also *watch* the whole video.
 - **Frames** (`--frames`) combine scene cuts, sampled after each transition settles, with a uniform pass so slow screen recordings are covered. Blank and near-duplicate frames are dropped, and short clips get fewer frames.
-- **Playlist and channel URLs** are listed rather than ingested. `playlist.py` ingests each entry into its own folder and proposes **clusters**: videos that share distinctive words in titles, chapters, tags and the opening of the transcript (TF-IDF cosine, average linkage). Words common to the whole playlist, like "ERP" or "tutorial", carry almost no weight.
+- **Playlist and channel URLs** are listed rather than ingested. `playlist.py` ingests each entry into its own folder and proposes **clusters**: videos that share distinctive words in titles, chapters, tags and the opening of the transcript (TF-IDF cosine, average linkage). Words common to the whole playlist, like the product name or "tutorial", carry almost no weight.
 
 The output is a work folder containing `transcript.md` (for Claude to read), `source.json` (machine-readable) and `frames/`. Nothing in it is ever treated as an instruction.
 

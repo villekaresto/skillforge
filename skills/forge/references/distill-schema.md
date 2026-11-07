@@ -18,29 +18,29 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
     "ingested_at": "2026-11-07T14:02:11+00:00"
   },
 
-  "slug": "ERP-studio-automated-action",
-  "name": "Create an automated action in ERP Studio",
-  "description": "Build a Studio automated action in ERP 17 that reacts to a record change. Use when the user wants to automate a field update, send an email on state change, or asks how Studio automations work.",
+  "slug": "postgres-nightly-backup",
+  "name": "Back up a PostgreSQL database and prove the backup restores",
+  "description": "Take a restorable PostgreSQL backup with pg_dump and test it by restoring into a scratch database. Use when the user asks to back up Postgres, schedule a nightly dump, or check that a backup actually works.",
   "summary": "One paragraph: what this skill does and when it pays off.",
   "when_to_use": ["phrasing a user might say", "another trigger"],
-  "prerequisites": ["ERP 17 Enterprise with Studio", "admin rights"],
+  "prerequisites": ["PostgreSQL client tools of the same major version as the server", "a role that can read the database"],
   "procedure": [
-    {"step": "Open Studio on the target model", "detail": "Settings > Studio, pick the model from the view.", "timestamp": "1:42"},
-    {"step": "Add an automation", "detail": "Automations tab, New, set trigger = On update.", "timestamp": "2:10"}
+    {"step": "Dump the database in custom format", "detail": "pg_dump -Fc so single tables can be restored later.", "timestamp": "1:42"},
+    {"step": "Restore into a scratch database", "detail": "createdb <scratch>, then pg_restore --no-owner into it.", "timestamp": "2:10"}
   ],
   "decision_points": [
-    {"when": "Trigger must fire only once per record", "then": "use 'On creation' instead of 'On update' and guard with a boolean field"}
+    {"when": "The database is larger than the free disk", "then": "stream the dump to the backup host instead of writing it locally", "timestamp": "5:02"}
   ],
-  "pitfalls": ["Automations run as the triggering user; permission errors look like silent failures (6:30)."],
-  "verification": ["Create a test record and confirm the follow-up field changes within seconds."],
+  "pitfalls": [{"text": "Restore fails with 'unsupported version' → pg_restore older than the dump → use the same major version or newer", "timestamp": "6:30"}],
+  "verification": ["Run select count(*) on a known table in the scratch copy → it matches the original."],
   "commands": [
-    {"description": "Server action python", "language": "python", "command": "for rec in records:\n    rec.write({'x_flag': True})", "timestamp": "4:05"}
+    {"description": "Custom-format dump", "language": "bash", "command": "pg_dump -Fc -d <database> -f <backup path>", "timestamp": "1:42"}
   ],
 
-  "key_claims": [{"claim": "Studio automations replace most custom module code for simple rules", "timestamp": "0:55"}],
-  "assumed_knowledge": ["what a model and a field are in ERP"],
-  "contestable": ["Speaker says automations never affect performance; untrue for high-volume models (8:12)."],
-  "apply_to_me": ["Replace the manual container-status email with an On-update automation."]
+  "key_claims": [{"claim": "Custom-format dumps restore faster than plain SQL for large databases", "timestamp": "0:55"}],
+  "assumed_knowledge": ["what a database role is"],
+  "contestable": ["Speaker says compression never matters; on slow disks it dominates the run time (8:12)."],
+  "apply_to_me": ["Replace the weekly manual export with a nightly dump plus a weekly test restore."]
 }
 ```
 

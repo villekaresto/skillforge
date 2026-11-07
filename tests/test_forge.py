@@ -170,7 +170,7 @@ def test_env_file_settings(tmp_path, monkeypatch):
 def test_frontmatter_description_is_quoted_yaml(tmp_path, monkeypatch):
     env = env_for(tmp_path, monkeypatch)
     d = distilled()
-    d["description"] = 'Reconcile banks in ERP: match lines, #tags, "quotes" - use for \'reconcile\''
+    d["description"] = 'Back up Postgres: dump, #tags, "quotes" - use for \'backup\''
     f = tmp_path / "d.json"
     f.write_text(json.dumps(d))
     r = run_forge([str(f), "--dry-run"], env)
@@ -206,10 +206,10 @@ def test_same_source_twice_is_idempotent(tmp_path, monkeypatch):
 
 
 def test_playlist_urls_are_detected_but_single_videos_are_not():
-    yes = ["https://www.youtube.com/playlist?list=PL1oT_5mNYVTOFA45zQO939vwvyodldvIk", "https://www.youtube.com/@ERP",
+    yes = ["https://www.youtube.com/playlist?list=PLaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "https://www.youtube.com/@examplechannel",
            "https://www.youtube.com/channel/UCkQPikELWZFLgQNHd73jkdg/videos"]
-    no = ["https://www.youtube.com/watch?v=1IQB_q-2YW8&list=PL1oT_5mNYVTOFA45zQO939vwvyodldvIk", "https://youtu.be/1IQB_q-2YW8",
-          "https://www.youtube.com/shorts/96HKB_QcRN0", "https://www.tiktok.com/@ERP/video/7695791676148796693", "https://vimeo.com/123"]
+    no = ["https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "https://youtu.be/aaaaaaaaaaa",
+          "https://www.youtube.com/shorts/bbbbbbbbbbb", "https://www.tiktok.com/@examplechannel/video/1234567890123456789", "https://vimeo.com/123"]
     assert all(ingest.is_playlist_url(u) for u in yes)
     assert not any(ingest.is_playlist_url(u) for u in no)
 
@@ -276,12 +276,12 @@ def test_merge_attributes_steps_to_their_source(tmp_path, monkeypatch):
 def test_note_keeps_caveats(tmp_path, monkeypatch):
     env = env_for(tmp_path, monkeypatch)
     d = distilled(worthy=False)
-    d["contestable"] = ["Title oversells this as B2B integration"]
-    d["assumed_knowledge"] = ["what a purchase order is"]
+    d["contestable"] = ["Title oversells this as a full course"]
+    d["assumed_knowledge"] = ["what a database role is"]
     f = tmp_path / "d.json"
     f.write_text(json.dumps(d))
     r = run_forge([str(f), "--dry-run"], env)
-    assert "Title oversells this as B2B integration" in r.stdout and "what a purchase order is" in r.stdout
+    assert "Title oversells this as a full course" in r.stdout and "what a database role is" in r.stdout
     assert "## Steps shown" in r.stdout and "2. Two (0:20)" in r.stdout
 
 
@@ -585,30 +585,30 @@ import clusters  # noqa: E402
 
 def test_clusters_group_videos_on_the_same_task():
     entries = [
-        {"key": "a1", "title": "ERP 17 automation rules tutorial", "text": "create an automation rule with a trigger and an action"},
-        {"key": "b1", "title": "Bank reconciliation in ERP 17", "text": "reconcile bank statement lines with invoices"},
-        {"key": "a2", "title": "Automated actions in ERP Studio", "text": "automation trigger on save then add an action to update the record"},
-        {"key": "c1", "title": "ERP 17 inventory reordering rules", "text": "replenishment with min max reordering rules"},
-        {"key": "b2", "title": "ERP bank reconciliation models explained", "text": "reconciliation models match bank lines automatically"},
-        {"key": "a3", "title": "Server actions and automation rules in ERP 17", "text": "automation rules trigger server actions"},
+        {"key": "a1", "title": "Postgres backup tutorial", "text": "create a backup with pg_dump and restore it"},
+        {"key": "b1", "title": "Sharpening a chisel on whetstones", "text": "flatten the back then hone the bevel"},
+        {"key": "a2", "title": "Postgres backups with pg_dump", "text": "nightly backup schedule then a test restore of the dump"},
+        {"key": "c1", "title": "Proofing sourdough bread", "text": "bulk fermentation and shaping the loaf"},
+        {"key": "b2", "title": "Chisel sharpening jig explained", "text": "honing guide angle for the chisel bevel"},
+        {"key": "a3", "title": "Restore a Postgres backup with pg_restore", "text": "restore the dump into a scratch database"},
     ]
     got = clusters.cluster_entries(entries)
     groups = sorted(sorted(c["keys"]) for c in got)
     assert groups == [["a1", "a2", "a3"], ["b1", "b2"], ["c1"]]
-    assert got[0]["keys"] == ["a1", "a2", "a3"] and "automation" in got[0]["label"]
-    assert "reconciliation" in next(c["label"] for c in got if c["keys"] == ["b1", "b2"])
+    assert got[0]["keys"] == ["a1", "a2", "a3"] and "backup" in got[0]["label"]
+    assert "chisel" in next(c["label"] for c in got if c["keys"] == ["b1", "b2"])
 
 
 def test_clusters_edge_cases():
     assert clusters.cluster_entries([]) == []
-    one = clusters.cluster_entries([{"key": "x", "title": "craft basics"}])
-    assert one == [{"keys": ["x"], "label": "craft basics"}]
-    loose = clusters.cluster_entries([{"key": "x", "title": "ERP 17 sales"}, {"key": "y", "title": "ERP 17 payroll"}])
+    one = clusters.cluster_entries([{"key": "x", "title": "Sourdough basics"}])
+    assert one == [{"keys": ["x"], "label": "sourdough basics"}]
+    loose = clusters.cluster_entries([{"key": "x", "title": "Postgres 16 replication"}, {"key": "y", "title": "Postgres 16 vacuum"}])
     assert len(loose) == 2, "sharing only the product name is not the same task"
 
 
 def test_cluster_tokens_fold_accents_plurals_and_stopwords():
-    assert clusters.tokens("How to reconcile Invoices in a Café") == ["reconc", "invoic", "cafe"]
+    assert clusters.tokens("How to sharpen Chisels in a Café") == ["sharpe", "chisel", "cafe"]
     assert clusters.tokens("automated automation automate") == ["automa"] * 3
     assert clusters.tokens("rules Rule fields") == ["rule", "rule", "field"]
 
@@ -697,7 +697,7 @@ def test_frames_download_no_more_video_than_needed():
 def test_dry_run_lints_loose_skills(tmp_path, monkeypatch):
     env = env_for(tmp_path, monkeypatch)
     d = distilled()
-    d["procedure"][0]["detail"] = "Open Studio (ERP 0:43) " + "and then do many more things " * 10
+    d["procedure"][0]["detail"] = "Open the settings (Docs 0:43) " + "and then do many more things " * 10
     d["pitfalls"] = ["Watch out for the trigger", "Rule fires on unrelated edits → no trigger field set → set Trigger Fields"]
     f = tmp_path / "d.json"
     f.write_text(json.dumps(d))
