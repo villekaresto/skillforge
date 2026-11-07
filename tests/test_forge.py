@@ -373,3 +373,27 @@ def test_blank_frames_are_dropped_but_dark_code_frames_survive(tmp_path):
 def test_no_speech_warning_points_to_frames():
     assert "--frames" in ingest.NO_SPEECH and "no speech" in ingest.NO_SPEECH
     assert "errors.append(NO_SPEECH)" in INGEST.read_text()
+
+
+def test_original_language_subtitle_track_wins_over_translation(tmp_path):
+    big_translation = tmp_path / "media.en.vtt"
+    big_translation.write_text("x" * 5000)
+    orig = tmp_path / "media.en-orig.vtt"
+    orig.write_text("x" * 10)
+    assert ingest.pick_subtitle([big_translation, orig], "en") == orig
+    assert ingest.pick_subtitle([big_translation], "en") == big_translation
+
+
+def test_untimed_claims_render_without_empty_brackets(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = distilled(worthy=False)
+    d["key_claims"] = [{"claim": "From the description only"}]
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    r = run_forge([str(f), "--dry-run"], env)
+    assert "- From the description only" in r.stdout and "[]" not in r.stdout
+
+
+def test_whisper_language_comes_from_the_user_not_youtube_metadata():
+    src = INGEST.read_text()
+    assert 'whisper_language(meta.get("language")' not in src

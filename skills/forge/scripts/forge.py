@@ -56,6 +56,10 @@ def today() -> str:
 
 # --------------------------------------------------------------------------- rendering
 
+def claim_line(c: dict) -> str:
+    return f"- [{c['timestamp']}] {c['claim']}" if c.get("timestamp") else f"- {c['claim']}"
+
+
 def render_skill_md(d: dict) -> str:
     name = d["name"]
     desc = d["description"].replace("\n", " ").strip()
@@ -141,7 +145,7 @@ def render_source_notes(d: dict, src: dict) -> str:
     out = [f"# Source notes: {src.get('title') or src['url']}", "", f"- URL: {src['url']}", f"- By: {src.get('uploader') or 'unknown'}",
            f"- Ingested: {src['ingested_at']}", f"- Verdict: {d['verdict']['reason']}", ""]
     if d.get("key_claims"):
-        out += ["## Key claims", *[f"- [{c.get('timestamp', '')}] {c['claim']}" for c in d["key_claims"]], ""]
+        out += ["## Key claims", *[claim_line(c) for c in d["key_claims"]], ""]
     if d.get("assumed_knowledge"):
         out += ["## What the speaker assumes you know", *[f"- {a}" for a in d["assumed_knowledge"]], ""]
     if d.get("contestable"):
@@ -166,7 +170,7 @@ def render_note(d: dict, src: dict) -> str:
     if d.get("summary"):
         out += ["## Takeaway", d["summary"].strip(), ""]
     if d.get("key_claims"):
-        out += ["## Key points", *[f"- [{c.get('timestamp', '')}] {c['claim']}" for c in d["key_claims"]], ""]
+        out += ["## Key points", *[claim_line(c) for c in d["key_claims"]], ""]
     if d.get("procedure"):
         out += ["## Steps shown (not forged as a skill)",
                 *[f"{i}. {st['step']}" + (f" ({st['timestamp']})" if st.get("timestamp") else "") for i, st in enumerate(d["procedure"], 1)], ""]

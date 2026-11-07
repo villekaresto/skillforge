@@ -193,6 +193,14 @@ def playlist_entries(url: str, auth: list[str]) -> dict:
             "next": "This is a playlist. Ingest each entry URL separately (one work dir each), then judge and merge per task."}
 
 
+def pick_subtitle(subs: list[Path], lang: str) -> Path:
+    """Prefer YouTube's '<lang>-orig' track: it is the speech-recognised original. When YouTube mislabels the audio
+    language, the plain '<lang>' auto track is a machine translation of a recognition in the wrong language."""
+    orig = [p for p in subs if f".{lang}-orig." in p.name]
+    exact = [p for p in subs if f".{lang}." in p.name]
+    return (orig or exact or sorted(subs, key=lambda p: p.stat().st_size, reverse=True))[0]
+
+
 def caption_failure(r: subprocess.CompletedProcess) -> str | None:
     """yt-dlp exits non-zero but still writes info.json when only the subtitle download fails (often HTTP 429)."""
     if r.returncode and re.search(r"Unable to download (?:video )?subtitles|HTTP Error \d+", r.stderr):
@@ -235,7 +243,7 @@ def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dic
         "chapters": [{"start": c.get("start_time"), "title": c.get("title")} for c in (info.get("chapters") or [])],
         "tags": (info.get("tags") or [])[:30], "language": info.get("language"),
     }
-    segs = parse_vtt(max(subs, key=lambda p: p.stat().st_size).read_text(encoding="utf-8", errors="replace")) if subs else []
+    segs = parse_vtt(pick_subtitle(subs, lang).read_text(encoding="utf-8", errors="replace")) if subs else []
     return meta, segs, provenance, (errors if not subs else [])
 
 
@@ -512,7 +520,9 @@ def write_transcript_md(meta: dict, segs: list[dict], provenance: str | None, ou
         lines += ["## Description", meta["description"].strip(), ""]
     lines.append("## Transcript")
     if not segs:
-        lines.append("_No transcript available. Use --engine local (needs uv) or --engine gemini (needs GEMINI_API_KEY), or --frames._")
+        lines.append("_Local transcription ran and found no speech (music, silence, or on-screen text only). Re-run with --frames._"
+                     if provenance == "local-whisper" else
+                     "_No transcript available. Use --engine local (needs uv) or --engine gemini (needs GEMINI_API_KEY), or --frames._")
     lines += [f"[{hms(s['start'])}] {s['text']}" for s in segs]
     p = out / "transcript.md"
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -528,11 +538,12 @@ def main() -> None:
     ap.add_argument("--frames", type=int, nargs="?", const=40, default=0, metavar="N", help="Extract up to N keyframes (default 40)")
     ap.add_argument("--resolution", type=int, default=768, help="Max frame width in px (default 768; 1280 for on-screen text)")
     ap.add_argument("--no-dedup", action="store_true", help="Keep near-duplicate frames")
-    ap.add_argument("--lang", default="en", help="Preferred caption language (default en)")
+    ap.add_argument("--lang", default="en", help="Preferred caption language (default en); also forces Whisper's language")
     ap.add_argument("--cookies", metavar="FILE", help="Netscape cookie file for private sources")
     ap.add_argument("--cookies-from-browser", metavar="BROWSER", help="firefox, chrome, safari, edge, brave ...")
     ap.add_argument("--keep-media", action="store_true", help="Keep downloaded media in the work dir")
     args = ap.parse_args()
+    args.lang_given = any(a == "--lang" or a.startswith("--lang=") for a in sys.argv[1:])
 
     if args.cookies and args.cookies_from_browser:
         die("use --cookies or --cookies-from-browser, not both")
@@ -606,7 +617,9 @@ def main() -> None:
 
         if transcribe == "local":
             try:
-                segs = transcribe_local(audio(), whisper_language(meta.get("language") or (args.lang if args.lang != "en" else None)))
+                # Only a language the user asked for: YouTube's metadata language is often wrong ('ja' on an English
+                # news clip, 'ar' on an English unboxing), and a forced wrong language makes Whisper translate or hallucinate.
+                segs = transcribe_local(audio(), whisper_language(args.lang if args.lang != "en" or args.lang_given else None))
                 provenance = "local-whisper"
                 if not segs:
                     errors.append(NO_SPEECH)
