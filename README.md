@@ -4,7 +4,7 @@
 
 `/forge` watches or listens to anything yt-dlp can reach (YouTube, Instagram, TikTok, Vimeo, podcast episodes, direct media links, local files), studies it, and decides whether the content teaches a reusable procedure. When it does, Claude writes a proper skill into `~/.claude/skills/` that it can use in every future session. When it doesn't, you get a short learning note instead of a fake skill.
 
-Later videos on the same topic merge into the existing skill rather than creating duplicates. Over time your skills folder becomes the distilled version of everything you've chosen to learn from.
+Later videos on the same topic merge into the existing skill rather than creating duplicates. Every step cites the video (or videos) it came from, `(S1 0:43; S2 0:38)`, and a merge can never silently drop a step another source backs. Over time your skills folder becomes the distilled version of everything you've chosen to learn from.
 
 ## How it works
 
@@ -63,7 +63,7 @@ Override with `SKILLFORGE_HOME` and `SKILLFORGE_SKILLS_DIR`.
 
 Captions and metadata are fetched by yt-dlp on your machine. Local transcription runs on your machine. Nothing leaves it unless you choose the Gemini engine, in which case the audio or video is uploaded to Google's Files API for the duration of the request and deleted afterwards. Keys are read from the environment or `~/.skillforge/.env` and never logged or written into skills.
 
-Robustness built in: one automatic retry with alternate YouTube clients on 403/signature failures, stale-file clearing when a work dir is reused, FFmpeg `-fps_mode`/`-vsync` detection for old and new builds, manual-vs-auto caption provenance, and near-duplicate frame removal.
+Robustness built in: one automatic retry with alternate YouTube clients on 403/signature failures, a wait-and-retry on caption rate limits (HTTP 429) with automatic fallback to local transcription, the original caption track preferred over YouTube's machine translations, playlist URLs listed instead of half-ingested, stale-file clearing when a work dir is reused, FFmpeg `-fps_mode`/`-vsync` detection for old and new builds, manual-vs-auto caption provenance, and frames sampled after transitions settle, spread over time, with blank and near-duplicate frames removed. Re-forging the same source is a no-op.
 
 ## Development
 
@@ -72,11 +72,10 @@ python3 -m venv .venv && .venv/bin/pip install pytest
 .venv/bin/pytest -q
 ```
 
-Tests cover forging, merging, notes, validation, and caption parsing. No network.
+Tests cover forging, merging and step attribution, idempotence, notes, validation, caption parsing and track choice, playlist detection, and frame selection on synthetic videos (needs ffmpeg). No network.
 
 ## Roadmap
 
-- Playlist and channel mode with one skill per task
 - Scheduled forging from a "to learn" playlist
 - Apple Silicon acceleration for local transcription (mlx-whisper)
 - Quiz and flashcard generation from the distilled notes
