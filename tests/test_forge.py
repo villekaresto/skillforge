@@ -577,3 +577,112 @@ def test_restudied_source_updates_its_confidence(tmp_path, monkeypatch):
     assert run_forge([str(f)], env).returncode == 0
     md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
     assert "(confidence 0.62)" in md and "(confidence 0.8)" not in md
+
+
+sys.path.insert(0, str(INGEST.parent))
+import clusters  # noqa: E402
+
+
+def test_clusters_group_videos_on_the_same_task():
+    entries = [
+        {"key": "a1", "title": "ERP 17 automation rules tutorial", "text": "create an automation rule with a trigger and an action"},
+        {"key": "b1", "title": "Bank reconciliation in ERP 17", "text": "reconcile bank statement lines with invoices"},
+        {"key": "a2", "title": "Automated actions in ERP Studio", "text": "automation trigger on save then add an action to update the record"},
+        {"key": "c1", "title": "ERP 17 inventory reordering rules", "text": "replenishment with min max reordering rules"},
+        {"key": "b2", "title": "ERP bank reconciliation models explained", "text": "reconciliation models match bank lines automatically"},
+        {"key": "a3", "title": "Server actions and automation rules in ERP 17", "text": "automation rules trigger server actions"},
+    ]
+    got = clusters.cluster_entries(entries)
+    groups = sorted(sorted(c["keys"]) for c in got)
+    assert groups == [["a1", "a2", "a3"], ["b1", "b2"], ["c1"]]
+    assert got[0]["keys"] == ["a1", "a2", "a3"] and "automation" in got[0]["label"]
+    assert "reconciliation" in next(c["label"] for c in got if c["keys"] == ["b1", "b2"])
+
+
+def test_clusters_edge_cases():
+    assert clusters.cluster_entries([]) == []
+    one = clusters.cluster_entries([{"key": "x", "title": "craft basics"}])
+    assert one == [{"keys": ["x"], "label": "craft basics"}]
+    loose = clusters.cluster_entries([{"key": "x", "title": "ERP 17 sales"}, {"key": "y", "title": "ERP 17 payroll"}])
+    assert len(loose) == 2, "sharing only the product name is not the same task"
+
+
+def test_cluster_tokens_fold_accents_plurals_and_stopwords():
+    assert clusters.tokens("How to reconcile Invoices in a Café") == ["reconc", "invoic", "cafe"]
+    assert clusters.tokens("automated automation automate") == ["automa"] * 3
+    assert clusters.tokens("rules Rule fields") == ["rule", "rule", "field"]
+
+
+def cluster_distilled(tmp_path):
+    for name in ("01-aaa", "02-bbb"):
+        (tmp_path / name / "frames").mkdir(parents=True, exist_ok=True)
+        (tmp_path / name / "frames" / "001_0-05.jpg").write_bytes(b"jpg")
+        (tmp_path / name / "frames" / "002_0-09.jpg").write_bytes(b"jpg")
+        (tmp_path / name / "source.json").write_text(json.dumps({"frames": [
+            {"index": 1, "stamp": "0:05", "path": "x/001_0-05.jpg"}, {"index": 2, "stamp": "0:09", "path": "x/002_0-09.jpg"}]}))
+    d = distilled()
+    del d["source"]
+    d["sources"] = [
+        {"url": "https://example.com/v/aaa", "id": "aaa", "title": "Video A", "ingested_at": "2026-11-07T10:00:00+00:00",
+         "work_dir": "01-aaa", "useless_frames": [2]},
+        {"url": "https://example.com/v/bbb", "id": "bbb", "title": "Video B", "ingested_at": "2026-11-07T10:00:00+00:00",
+         "work_dir": "02-bbb", "confidence": 0.6},
+    ]
+    d["procedure"] = [{"step": "One", "refs": [{"source": "aaa", "timestamp": "0:10"}, {"source": "bbb", "timestamp": "1:10"}]},
+                      {"step": "Two", "source": "bbb", "timestamp": "2:00"}, {"step": "Three"}]
+    return d
+
+
+def test_a_playlist_cluster_forges_one_skill_from_several_videos(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = cluster_distilled(tmp_path)
+    (tmp_path / "cluster.json").write_text(json.dumps(d))
+    r = run_forge([str(tmp_path / "cluster.json"), "--dry-run"], env)
+    assert "would create" in r.stdout and "2 sources; 3 frames to references, 1 marked useless" in r.stdout
+    assert "1 step(s) cite no source" in r.stdout and "'Three'" in r.stdout
+    r = run_forge([str(tmp_path / "cluster.json")], env)
+    assert json.loads(r.stdout)["sources"] == 2
+    skill = tmp_path / "skills" / "demo-task"
+    md = (skill / "SKILL.md").read_text()
+    assert "**One** _(S1 0:10; S2 1:10)_" in md and "**Two** _(S2 2:00)_" in md and "(confidence 0.6)" in md
+    assert sorted(p.name for p in (skill / "references" / "frames" / "aaa").iterdir()) == ["001_0-05.jpg"]
+    assert len(list((skill / "references" / "frames" / "bbb").iterdir())) == 2
+    stored = json.loads((skill / ".forge" / "skill.json").read_text())
+    assert all("work_dir" not in s and "_work_dir" not in s for s in stored["sources"])
+
+
+def test_combined_dry_run_over_several_files_and_cluster_notes_refused(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = cluster_distilled(tmp_path)
+    (tmp_path / "c1.json").write_text(json.dumps(d))
+    n = distilled(url="https://example.com/v/ccc", worthy=False)
+    n["slug"] = "a-topic"
+    (tmp_path / "n1.json").write_text(json.dumps(n))
+    r = run_forge([str(tmp_path / "c1.json"), str(tmp_path / "n1.json"), "--dry-run"], env)
+    assert r.returncode == 0 and r.stdout.count("======== ") == 2 and "would create learning note" in r.stdout
+    bad = cluster_distilled(tmp_path)
+    bad["verdict"]["skill_worthy"] = False
+    (tmp_path / "bad.json").write_text(json.dumps(bad))
+    r = run_forge([str(tmp_path / "bad.json"), "--dry-run"], env)
+    assert r.returncode == 2 and "one distilled.json per video" in r.stderr
+
+
+def test_whisper_backend_order(monkeypatch):
+    import platform
+    monkeypatch.setattr(ingest, "setting", lambda name: None)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    assert ingest.whisper_backends() == ["mlx", "faster"], "Apple Silicon tries MLX first, faster-whisper as fallback"
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    assert ingest.whisper_backends() == ["faster"]
+    monkeypatch.setattr(ingest, "setting", lambda name: "faster" if name == "SKILLFORGE_WHISPER_BACKEND" else None)
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    assert ingest.whisper_backends() == ["faster"]
+
+
+def test_mlx_helper_drops_non_speech_and_loops():
+    import whisper_mlx
+    assert whisper_mlx.keep({"no_speech_prob": 0.1, "avg_logprob": -0.3, "compression_ratio": 1.4})
+    assert not whisper_mlx.keep({"no_speech_prob": 0.9, "avg_logprob": -1.4, "compression_ratio": 1.2})
+    assert not whisper_mlx.keep({"no_speech_prob": 0.0, "avg_logprob": -0.2, "compression_ratio": 3.1})
+    assert whisper_mlx.MODELS["small"] == "mlx-community/whisper-small-mlx"

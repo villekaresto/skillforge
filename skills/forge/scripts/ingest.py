@@ -464,17 +464,38 @@ def whisper_language(code: str | None) -> str | None:
     return base if re.fullmatch(r"[a-z]{2,3}", base) else None
 
 
-def transcribe_local(audio: Path, language: str | None) -> list[dict]:
-    helper = Path(__file__).with_name("whisper_local.py")
-    cmd = [need("uv"), "run", "--quiet", "--with", "faster-whisper>=1.1", "--python", "3.12", str(helper), str(audio),
-           "--model", WHISPER_MODEL]
-    if language:
-        cmd += ["--language", language]
-    log(f"local transcription with faster-whisper {WHISPER_MODEL} (first run downloads the model)")
-    r = run(cmd, timeout=int(setting("SKILLFORGE_WHISPER_TIMEOUT") or 3600))
-    if r.returncode:
-        raise RuntimeError(f"local transcription failed:\n{r.stderr[-1200:]}")
-    return json.loads(r.stdout)
+WHISPER_BACKENDS = {
+    "mlx": ("whisper_mlx.py", "mlx-whisper>=0.4"),          # Apple Silicon GPU through MLX
+    "faster": ("whisper_local.py", "faster-whisper>=1.1"),  # CPU (or CUDA) through CTranslate2, works everywhere
+}
+
+
+def whisper_backends() -> list[str]:
+    """Order to try: SKILLFORGE_WHISPER_BACKEND=mlx|faster forces one; auto prefers MLX on arm64 macOS."""
+    import platform
+    forced = (setting("SKILLFORGE_WHISPER_BACKEND") or "auto").lower()
+    if forced in WHISPER_BACKENDS:
+        return [forced]
+    apple_silicon = sys.platform == "darwin" and platform.machine() == "arm64"
+    return ["mlx", "faster"] if apple_silicon else ["faster"]
+
+
+def transcribe_local(audio: Path, language: str | None) -> tuple[list[dict], str]:
+    """Returns (segments, backend). Falls back to faster-whisper when the MLX path fails (no wheel, old macOS)."""
+    failures = []
+    for backend in whisper_backends():
+        script, package = WHISPER_BACKENDS[backend]
+        cmd = [need("uv"), "run", "--quiet", "--with", package, "--python", "3.12", str(Path(__file__).with_name(script)),
+               str(audio), "--model", WHISPER_MODEL]
+        if language:
+            cmd += ["--language", language]
+        log(f"local transcription with {package.split('>')[0]} {WHISPER_MODEL} (first run downloads the model)")
+        r = run(cmd, timeout=int(setting("SKILLFORGE_WHISPER_TIMEOUT") or 3600))
+        if not r.returncode:
+            return json.loads(r.stdout), backend
+        failures.append(f"{backend}: {tail(r.stderr)}")
+        log(f"{backend} transcription failed; " + ("trying the next backend" if backend != whisper_backends()[-1] else "giving up"))
+    raise RuntimeError("local transcription failed:\n" + "\n".join(failures))
 
 
 # --------------------------------------------------------------------------- gemini
@@ -639,6 +660,7 @@ def main() -> None:
         die("--engine gemini needs GEMINI_API_KEY (env or ~/.skillforge/.env). Free key: https://aistudio.google.com/apikey")
 
     errors: list[str] = [] if local else list(caption_errors)
+    whisper_backend: str | None = None
     frames: list[dict] = []
     if transcribe or watch or args.frames:
         if media is None:
@@ -662,7 +684,7 @@ def main() -> None:
             try:
                 # Only a language the user asked for: YouTube's metadata language is often wrong ('ja' on an English
                 # news clip, 'ar' on an English unboxing), and a forced wrong language makes Whisper translate or hallucinate.
-                segs = transcribe_local(audio(), whisper_language(args.lang if args.lang != "en" or args.lang_given else None))
+                segs, whisper_backend = transcribe_local(audio(), whisper_language(args.lang if args.lang != "en" or args.lang_given else None))
                 provenance = "local-whisper"
                 if not segs:
                     errors.append(NO_SPEECH_FRAMES if frames else NO_SPEECH)
@@ -698,7 +720,8 @@ def main() -> None:
     md = write_transcript_md(meta, segs, provenance, out, has_frames=bool(frames))
     print(json.dumps({"work_dir": str(out), "transcript_md": str(md), "title": meta.get("title"), "uploader": meta.get("uploader"),
                       "duration": hms(meta["duration"]) if meta.get("duration") else None, "segments": len(segs),
-                      "transcript_provenance": provenance, "frames": len(frames), "gemini_notes": bool(gemini_notes),
+                      "transcript_provenance": provenance, "whisper_backend": whisper_backend,
+                      "frames": len(frames), "gemini_notes": bool(gemini_notes),
                       "errors": errors, "slug_hint": meta["slug_hint"]}, indent=2))
 
 

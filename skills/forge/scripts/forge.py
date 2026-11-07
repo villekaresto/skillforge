@@ -25,7 +25,6 @@ HOME = Path(os.environ.get("SKILLFORGE_HOME", Path.home() / ".skillforge"))
 SKILLS_DIR = Path(os.environ.get("SKILLFORGE_SKILLS_DIR", Path.home() / ".claude" / "skills"))
 NOTES_DIR = HOME / "notes"
 CATALOG = HOME / "catalog.json"
-REQUIRED = {"verdict", "source"}
 
 
 def die(msg: str, code: int = 2) -> None:
@@ -290,47 +289,69 @@ def upsert_note(text: str | None, slug: str, url: str, section: str) -> tuple[st
 # --------------------------------------------------------------------------- forging
 
 def validate(d: dict) -> None:
-    missing = REQUIRED - d.keys()
-    if missing:
-        die(f"distilled JSON missing keys: {sorted(missing)}")
+    if "verdict" not in d or not ("source" in d or "sources" in d):
+        die("distilled JSON needs 'verdict' and 'source' (or 'sources' for a playlist cluster)")
     if "skill_worthy" not in d["verdict"] or "reason" not in d["verdict"]:
         die("verdict needs skill_worthy (bool) and reason (str)")
     if d["verdict"]["skill_worthy"]:
         for k in ("slug", "name", "description", "procedure"):
             if not d.get(k):
                 die(f"skill-worthy output needs {k!r}")
-    if "url" not in d["source"]:
-        die("source needs url")
+    incoming = d["sources"] if "sources" in d else [d["source"]]
+    if not isinstance(incoming, list) or not incoming or not all(isinstance(s, dict) and s.get("url") for s in incoming):
+        die("every source needs a url")
+    if "sources" in d and not d["verdict"]["skill_worthy"]:
+        die("a learning note covers one source: write one distilled.json per video, reusing the topic slug")
+    for u in [d.get("useless_frames")] + [s.get("useless_frames") for s in incoming]:
+        if u is not None and (not isinstance(u, list) or not all(isinstance(i, int) for i in u)):
+            die("useless_frames must be a list of frame indexes (integers)")
 
 
-def dropped_steps(existing: dict | None, procedure: list[dict], incoming: dict) -> list[str]:
-    """Stored steps that cite a source other than the incoming one and are missing from the new procedure.
+def dropped_steps(existing: dict | None, procedure: list[dict], incoming_ids: set) -> list[str]:
+    """Stored steps that cite a source other than the incoming ones and are missing from the new procedure.
     That is what re-forging an old single-source distilled.json over a merged skill looks like."""
     if not existing or len(existing.get("sources", [])) < 2:
         return []
-    mine = {incoming.get("id"), incoming["url"]} - {None}
     kept = {st["step"] for st in procedure}
     lost = []
     for st in existing.get("procedure", []):
         cited = {r.get("source") for r in st.get("refs") or []} | {st.get("source")}
-        if st["step"] not in kept and cited - {None} - mine:
+        if st["step"] not in kept and cited - {None} - incoming_ids:
             lost.append(st["step"])
     return lost
 
 
+def incoming_sources(d: dict, work_dir: Path | None) -> list[dict]:
+    """The source(s) this distilled.json brings, each with its own work dir (for frames) and useless_frames."""
+    now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    out = []
+    for raw in (d["sources"] if "sources" in d else [d["source"]]):
+        src = dict(raw)
+        wd = src.pop("work_dir", None)
+        src["_work_dir"] = (work_dir / wd if work_dir and not Path(wd).is_absolute() else Path(wd)) if wd else work_dir
+        useless = src.get("useless_frames") if "sources" in d else (d.get("useless_frames") or src.get("useless_frames"))
+        if useless:
+            src["useless_frames"] = sorted(set(useless))
+        src.setdefault("ingested_at", now)
+        if "sources" in d:
+            src.setdefault("confidence", d["verdict"].get("confidence"))   # a cluster may rate each video separately
+        else:
+            src["confidence"] = d["verdict"].get("confidence")
+        out.append(src)
+    return out
+
+
+def public(src: dict) -> dict:
+    return {k: v for k, v in src.items() if not k.startswith("_")}
+
+
 def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | None = None) -> None:
     validate(d)
-    useless = d.get("useless_frames") or []
-    if not isinstance(useless, list) or not all(isinstance(i, int) for i in useless):
-        die("useless_frames must be a list of frame indexes (integers)")
-    src = dict(d["source"])
-    if useless:
-        src["useless_frames"] = sorted(set(useless))
-    src.setdefault("ingested_at", dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"))
-    src["confidence"] = d["verdict"].get("confidence")
+    incoming = incoming_sources(d, work_dir)
     cat = load_catalog()
 
     if not d["verdict"]["skill_worthy"]:
+        src = public(incoming[0])
         slug = slugify(d.get("slug") or re.sub(r"[^a-z0-9]+", "-", (src.get("title") or "note").lower())[:50])
         # One file per topic slug; each source is a dated section, replaced when the same source is re-studied.
         path = NOTES_DIR / f"{slug}.md"
@@ -358,22 +379,25 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
 
     # Sources accumulate; everything else is the latest distilled (Claude merges content before calling us).
     sources = list((existing or {}).get("sources", []))   # a copy: `existing` must keep describing the stored version
-    new_source = not any(s["url"] == src["url"] for s in sources)
-    if new_source:
-        sources.append(src)
-    else:                                        # same source re-studied: its confidence and frame verdicts may have changed
-        refreshed = {k: src[k] for k in ("confidence", "useless_frames") if k in src}
-        sources = [{**s, **refreshed} if s["url"] == src["url"] else s for s in sources]
+    new_source = False
+    for src in incoming:
+        if not any(s["url"] == src["url"] for s in sources):
+            sources.append(public(src))
+            new_source = True
+        else:                                    # same source re-studied: its confidence and frame verdicts may have changed
+            refreshed = {k: src[k] for k in ("confidence", "useless_frames") if k in src}
+            sources = [{**s, **refreshed} if s["url"] == src["url"] else s for s in sources]
     # Re-forging the same source with the same content re-renders the files but is not a new version.
-    content = {k: v for k, v in d.items() if k not in ("source", "useless_frames")}   # frame verdicts belong to the source
-    lost = dropped_steps(existing, content.get("procedure", []), src)
+    content = {k: v for k, v in d.items() if k not in ("source", "sources", "useless_frames")}   # frame verdicts belong to sources
+    ids = {x for s in incoming for x in (s.get("id"), s["url"]) if x}
+    lost = dropped_steps(existing, content.get("procedure", []), ids)
     if lost and not allow_drop:
         die(f"this would drop {len(lost)} step(s) that other sources of '{slug}' back: {lost[:5]}. "
             f"Load the stored version with --show {slug} and merge into it, or pass --allow-drop if removing them is intended.")
-    if len(sources) > 1:
+    if len(sources) > 1 and existing and len(incoming) == 1:
         for field, fn in (("procedure", attribute_steps), ("pitfalls", attribute_pitfalls), ("decision_points", attribute_decisions)):
             if content.get(field):
-                content[field] = fn(content[field], existing, src)
+                content[field] = fn(content[field], existing, incoming[0])
     old_content = {k: v for k, v in (existing or {}).items() if k not in ("sources", "forged_at", "version")}
     changed = existing is None or new_source or content != old_content
     merged = {**content, "sources": sources,
@@ -382,33 +406,39 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     action = "create" if not existing else "update" if changed else "unchanged"
 
     skill_md = render_skill_md(merged)
-    frames, omitted = source_frames(work_dir, set(useless))
+    per_source = [(src, *source_frames(src["_work_dir"], set(src.get("useless_frames") or []))) for src in incoming]
+    uncited = [st["step"] for st in merged.get("procedure", []) if not st.get("source") and not st.get("refs")] if len(sources) > 1 else []
     if dry_run:
         verb = {"create": "would create", "update": "would update", "unchanged": "unchanged, would re-render"}[action]
+        kept, omitted = sum(len(f) for _, f, _ in per_source), sum(o for _, _, o in per_source)
         print(f"# {verb} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)}; "
-              f"{len(frames)} frames to references, {omitted} marked useless)\n")
+              f"{kept} frames to references, {omitted} marked useless)")
+        if uncited:
+            print(f"# warning: {len(uncited)} step(s) cite no source in a multi-source skill: {uncited[:3]}")
+        print()
         print(skill_md)
         return
 
     (skill_dir / "references").mkdir(parents=True, exist_ok=True)
     (skill_dir / ".forge").mkdir(exist_ok=True)
     (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
-    key = source_key(src)
-    frame_dir = skill_dir / "references" / "frames" / key
-    shutil.rmtree(frame_dir, ignore_errors=True)
-    links = []
-    if frames:
-        frame_dir.mkdir(parents=True)
-        for f in frames:
-            shutil.copyfile(f["file"], frame_dir / f["file"].name)
-            links.append(f"- [{f.get('stamp', '')}](frames/{key}/{f['file'].name})")
-    (skill_dir / "references" / f"source-{key}.md").write_text(render_source_notes(merged, src, links), encoding="utf-8")
+    for src, frames, _ in per_source:
+        key = source_key(src)
+        frame_dir = skill_dir / "references" / "frames" / key
+        shutil.rmtree(frame_dir, ignore_errors=True)
+        links = []
+        if frames:
+            frame_dir.mkdir(parents=True)
+            for f in frames:
+                shutil.copyfile(f["file"], frame_dir / f["file"].name)
+                links.append(f"- [{f.get('stamp', '')}](frames/{key}/{f['file'].name})")
+        (skill_dir / "references" / f"source-{key}.md").write_text(render_source_notes(merged, public(src), links), encoding="utf-8")
     if merged.get("commands"):
         (skill_dir / "references" / "commands.md").write_text(render_commands(merged), encoding="utf-8")
     store.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
 
     cat["skills"][slug] = {"name": merged["name"], "path": str(skill_dir), "version": merged["version"], "updated": today(),
-                           "sources": [s["url"] for s in sources], "confidence": src["confidence"]}
+                           "sources": [s["url"] for s in sources], "confidence": d["verdict"].get("confidence")}
     save_catalog(cat)
     print(json.dumps({"written": action, "skill": slug, "path": str(skill_dir),
                       "version": merged["version"], "sources": len(sources)}, indent=2))
@@ -416,7 +446,7 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("distilled", nargs="?", help="Path to distilled JSON written by Claude")
+    ap.add_argument("distilled", nargs="*", help="distilled JSON file(s) written by Claude; several give one combined dry-run or write")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--allow-drop", action="store_true", help="allow an update to remove steps that other sources back")
     ap.add_argument("--list", action="store_true")
@@ -434,8 +464,11 @@ def main() -> None:
         return
     if not a.distilled:
         ap.error("distilled JSON path required")
-    path = Path(a.distilled)
-    forge(json.loads(path.read_text(encoding="utf-8")), a.dry_run, a.allow_drop, work_dir=path.resolve().parent)
+    for i, name in enumerate(a.distilled):
+        path = Path(name)
+        if len(a.distilled) > 1:
+            print(f"{chr(10) if i else ''}======== {path} ========")
+        forge(json.loads(path.read_text(encoding="utf-8")), a.dry_run, a.allow_drop, work_dir=path.resolve().parent)
 
 
 if __name__ == "__main__":
