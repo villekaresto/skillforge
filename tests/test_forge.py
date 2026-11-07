@@ -812,3 +812,22 @@ def test_legacy_notes_can_be_adopted_into_a_topic(tmp_path, monkeypatch):
     d["slug"] = "bike-tubes"
     (tmp_path / "d.json").write_text(json.dumps(d))
     assert json.loads(run_forge([str(tmp_path / "d.json")], env).stdout)["action"] == "append"
+
+
+def test_rewrite_without_evidence_keeps_frames_already_in_references(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    work = tmp_path / "work"
+    (work / "frames").mkdir(parents=True)
+    (work / "frames" / "001_0-10.jpg").write_bytes(b"jpg")
+    (work / "source.json").write_text(json.dumps({"frames": [{"index": 1, "stamp": "0:10", "path": "x/001_0-10.jpg"}]}))
+    (work / "distilled.json").write_text(json.dumps(distilled()))
+    assert run_forge([str(work / "distilled.json")], env).returncode == 0
+    elsewhere = tmp_path / "rewrite"
+    elsewhere.mkdir()
+    d = distilled()
+    d["procedure"][0]["step"] = "One, tighter"
+    (elsewhere / "distilled.json").write_text(json.dumps(d))        # no source.json next to it
+    assert run_forge([str(elsewhere / "distilled.json")], env).returncode == 0
+    refs = tmp_path / "skills" / "demo-task" / "references"
+    assert (refs / "frames" / "abc" / "001_0-10.jpg").is_file()
+    assert "frames/abc/001_0-10.jpg" in (refs / "source-abc.md").read_text()

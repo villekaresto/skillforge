@@ -513,9 +513,13 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     for src, frames, _ in per_source:
         key = source_key(src)
         frame_dir = skill_dir / "references" / "frames" / key
-        shutil.rmtree(frame_dir, ignore_errors=True)
         links = []
-        if frames:
+        evidence = src["_work_dir"] and (src["_work_dir"] / "source.json").is_file()
+        if not evidence:                 # rewriting from stored sources: keep the frames already in references
+            links = [f"- [{p.stem.split('_', 1)[-1].replace('-', ':')}](frames/{key}/{p.name})" for p in sorted(frame_dir.glob("*.jpg"))]
+        else:
+            shutil.rmtree(frame_dir, ignore_errors=True)
+        if evidence and frames:
             frame_dir.mkdir(parents=True)
             for f in frames:
                 shutil.copyfile(f["file"], frame_dir / f["file"].name)
