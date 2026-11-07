@@ -162,12 +162,18 @@ def ytdlp_base(auth: list[str]) -> list[str]:
     return [need("yt-dlp"), "--no-playlist", "--no-warnings", *auth]
 
 
-def ytdlp_with_retry(cmd: list[str], label: str) -> subprocess.CompletedProcess:
+def ytdlp_with_retry(cmd: list[str], label: str, timeout: int = 3600) -> subprocess.CompletedProcess:
     """One retry with alternate YouTube clients, which clears most 403 / nsig / format failures without updating yt-dlp."""
-    r = run(cmd, timeout=600)
+    try:
+        r = run(cmd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        die(f"{label}: yt-dlp did not finish within {timeout // 60} min (very long video or a throttled connection).")
     if r.returncode and any(k in r.stderr for k in RETRYABLE):
         log(f"{label}: retrying with alternate player clients")
-        r = run([*cmd, "--extractor-args", "youtube:player_client=android,ios,web"], timeout=600)
+        try:
+            r = run([*cmd, "--extractor-args", "youtube:player_client=android,ios,web"], timeout=timeout)
+        except subprocess.TimeoutExpired:
+            die(f"{label}: yt-dlp did not finish within {timeout // 60} min on the retry.")
     return r
 
 
@@ -325,12 +331,9 @@ def video_format(frame_width: int) -> str:
     return f"bv*[height<={h}][fps<=30]+ba/bv*[height<={h}]+ba/b[height<={h}]/b"
 
 
-def download_media(url: str, out: Path, audio_only: bool, auth: list[str], frame_width: int = 768,
-                   section: tuple[float, float] | None = None) -> Path:
+def download_media(url: str, out: Path, audio_only: bool, auth: list[str], frame_width: int = 768) -> Path:
     fmt = ["-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a"] if audio_only else \
           ["-f", video_format(frame_width), "--merge-output-format", "mp4"]
-    if section:
-        fmt += ["--download-sections", f"*{section[0]:.0f}-{section[1]:.0f}"]
     r = ytdlp_with_retry([*ytdlp_base(auth), *fmt, "-o", str(out / "media.%(ext)s"), url], "download")
     files = [p for p in out.glob("media.*") if p.suffix.lower() in AUDIO_EXT | VIDEO_EXT and not p.name.endswith(".part")]
     if r.returncode or not files:
@@ -643,7 +646,7 @@ def main() -> None:
                     help="Transcription when there are no captions. gemini also WATCHES the whole video.")
     ap.add_argument("--frames", type=int, nargs="?", const=40, default=0, metavar="N", help="Extract up to N keyframes (default 40)")
     ap.add_argument("--resolution", type=int, default=768, help="Max frame width in px (default 768; 1280 for on-screen text)")
-    ap.add_argument("--section", metavar="START-END", help="frames from this part only, e.g. 1:17:00-1:37:00 (long webinars, streams)")
+    ap.add_argument("--section", metavar="START-END", help="take frames from this part only, e.g. 1:17:00-1:37:00 (long webinars, streams)")
     ap.add_argument("--no-dedup", action="store_true", help="Keep near-duplicate frames")
     ap.add_argument("--lang", default="en", help="Preferred caption language (default en); also forces Whisper's language")
     ap.add_argument("--cookies", metavar="FILE", help="Netscape cookie file for private sources")
@@ -702,23 +705,29 @@ def main() -> None:
     if watch and not key:
         die("--engine gemini needs GEMINI_API_KEY (env or ~/.skillforge/.env). Free key: https://aistudio.google.com/apikey")
 
-    section: tuple[float, float] | None = None
+    section = parse_section(args.section) if args.section else None      # frames only; transcript stays complete
+    if section and not args.frames:
+        log("--section only applies to --frames; ignoring it")
     errors: list[str] = [] if local else list(caption_errors)
     whisper_backend: str | None = None
     frames: list[dict] = []
     if transcribe or watch or args.frames:
         if media is None:
-            # A section download only serves frames: transcription and Gemini need the whole recording.
-            section = parse_section(args.section) if args.section and args.frames and not transcribe and not watch else None
-            if args.section and not section:
-                log("--section ignored: this run also transcribes or watches the whole video")
-            media = download_media(src, out, not (watch or args.frames), auth, args.resolution if not watch else 1280, section)
+            media = download_media(src, out, not (watch or args.frames), auth, args.resolution if not watch else 1280)
         is_video = media.suffix.lower() in VIDEO_EXT
 
         if args.frames:                                    # frames first: they must survive a transcription failure
-            if is_video:
-                frames = extract_frames(media, out, args.frames, (section[1] - section[0]) if section else meta.get("duration"),
-                                        args.resolution, args.no_dedup, offset=section[0] if section else 0.0)
+            if is_video and section:
+                # Cut the section locally: yt-dlp's ranged downloads stream through ffmpeg and crawl. A fast re-encode
+                # keeps the cut frame-accurate, so frame stamps line up with the transcript.
+                clip = out / "section.mp4"
+                run([need("ffmpeg"), "-v", "error", "-y", "-ss", f"{section[0]:.2f}", "-i", media, "-t", f"{section[1] - section[0]:.2f}",
+                     "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", clip], timeout=1800)
+                frames = extract_frames(clip, out, args.frames, section[1] - section[0], args.resolution, args.no_dedup,
+                                        offset=section[0])
+                clip.unlink(missing_ok=True)
+            elif is_video:
+                frames = extract_frames(media, out, args.frames, meta.get("duration"), args.resolution, args.no_dedup)
             else:
                 log("--frames ignored: source is audio only")
 
