@@ -300,6 +300,21 @@ def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 3.0) 
     return kept
 
 
+def settle_times(stamps: list[float], duration: float | None, gap: float = 1.0, settle: float = 0.7) -> list[float]:
+    """Scene detection fires during a transition (wipes, fades), often several times a second. Collapse cuts that are
+    less than `gap` apart and sample `settle` seconds after the last one, when the new screen is fully drawn."""
+    out: list[float] = []
+    group_end = None
+    for t in sorted(stamps):
+        if group_end is not None and t - group_end >= gap:
+            out.append(group_end + settle)
+        group_end = t
+    if group_end is not None:
+        out.append(group_end + settle)
+    limit = (duration - 0.1) if duration else None
+    return [min(t, limit) if limit else t for t in out]
+
+
 def extract_frames(video: Path, out: Path, max_frames: int, duration: float | None, width: int, no_dedup: bool) -> list[dict]:
     """Scene changes (threshold 0.2) plus a uniform pass, merged by time, near-duplicates removed, thinned to the cap.
     The uniform pass guarantees coverage of slow screen recordings where typing never trips the scene detector."""
@@ -307,10 +322,15 @@ def extract_frames(video: Path, out: Path, max_frames: int, duration: float | No
     frames_dir = out / "frames"
     frames_dir.mkdir(exist_ok=True)
     scale = f"scale='min({width},iw)':-2"
-    r = run([ffmpeg, "-hide_banner", "-i", video, "-vf", f"select='gt(scene,0.2)',{scale},showinfo", *vfr_flag(ffmpeg),
-             "-frames:v", max_frames * 3, "-q:v", 3, frames_dir / "scene_%04d.jpg"], timeout=1800)
+    r = run([ffmpeg, "-hide_banner", "-i", video, "-vf", "select='gt(scene,0.2)',showinfo", *vfr_flag(ffmpeg), "-f", "null", "-"],
+            timeout=1800)
     stamps = [float(m) for m in re.findall(r"pts_time:([0-9.]+)", r.stderr)]
-    pairs = list(zip(sorted(frames_dir.glob("scene_*.jpg")), stamps))
+    pairs = []
+    for i, t in enumerate(settle_times(stamps, duration)[: max_frames * 3]):
+        f = frames_dir / f"scene_{i:04d}.jpg"
+        run([ffmpeg, "-hide_banner", "-ss", f"{t:.2f}", "-i", video, "-frames:v", 1, "-vf", scale, "-q:v", 3, f], timeout=120)
+        if f.is_file():
+            pairs.append((f, t))
     if duration:
         step = max(duration / max(max_frames, 1), 2.0)
         run([ffmpeg, "-hide_banner", "-i", video, "-vf", f"fps=1/{step:.3f},{scale}", "-q:v", 3, frames_dir / "uniform_%04d.jpg"], timeout=1800)

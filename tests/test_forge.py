@@ -282,3 +282,24 @@ def test_note_keeps_caveats(tmp_path, monkeypatch):
     f.write_text(json.dumps(d))
     r = run_forge([str(f), "--dry-run"], env)
     assert "Title oversells this as B2B integration" in r.stdout and "what a purchase order is" in r.stdout
+
+
+def test_scene_cuts_in_a_transition_collapse_to_one_settled_frame():
+    assert ingest.settle_times([10.0, 10.2, 10.5, 30.0], duration=120) == [11.2, 30.7]
+    assert ingest.settle_times([59.8], duration=60) == [59.9]
+    assert ingest.settle_times([], duration=60) == []
+
+
+def test_extract_frames_on_a_synthetic_video(tmp_path):
+    import shutil
+    if not shutil.which("ffmpeg"):
+        __import__("pytest").skip("ffmpeg missing")
+    video = tmp_path / "v.mp4"
+    # red 3 s, blue 3 s, red 3 s: two hard cuts
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=red:s=320x240:d=3", "-f", "lavfi", "-i",
+                    "color=blue:s=320x240:d=3", "-f", "lavfi", "-i", "color=red:s=320x240:d=3", "-filter_complex",
+                    "[0][1][2]concat=n=3:v=1:a=0", str(video)], check=True)
+    frames = ingest.extract_frames(video, tmp_path, max_frames=10, duration=9.0, width=320, no_dedup=False)
+    assert frames and all(Path(f["path"]).is_file() for f in frames)
+    assert len({f["path"] for f in frames}) == len(frames)
+    assert not list((tmp_path / "frames").glob("scene_*")) and not list((tmp_path / "frames").glob("uniform_*"))
