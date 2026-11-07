@@ -67,14 +67,16 @@ def render_skill_md(d: dict) -> str:
         out += ["## When to use", *[f"- {t}" for t in d["when_to_use"]], ""]
     if d.get("prerequisites"):
         out += ["## Prerequisites", *[f"- {p}" for p in d["prerequisites"]], ""]
+    labels = source_labels(d["sources"])
     if d.get("procedure"):
         out.append("## Procedure")
         for i, step in enumerate(d["procedure"], 1):
             line = f"{i}. **{step['step']}**"
             if step.get("detail"):
                 line += f" {step['detail']}"
-            if step.get("timestamp"):
-                line += f" _(source {step['timestamp']})_"
+            where = labels.get(step.get("source") or "") if len(d["sources"]) > 1 else None
+            if step.get("timestamp") or where:
+                line += f" _({' '.join(x for x in (where or 'source', step.get('timestamp')) if x)})_"
             out.append(line)
         out.append("")
     if d.get("decision_points"):
@@ -90,11 +92,39 @@ def render_skill_md(d: dict) -> str:
         out += ["## Commands", "See `references/commands.md` for every command shown in the source, with timestamps. "
                 "Review before running; they were transcribed from a video, not tested here.", ""]
     out += ["## Sources"]
-    for s in d["sources"]:
-        out.append(f"- [{s.get('title') or s['url']}]({s['url']}) by {s.get('uploader') or 'unknown'}, ingested {s['ingested_at'][:10]}"
-                   f" (confidence {s.get('confidence', '?')})")
+    multi = len(d["sources"]) > 1
+    for i, s in enumerate(d["sources"], 1):
+        out.append(f"- {f'S{i}: ' if multi else ''}[{s.get('title') or s['url']}]({s['url']}) by {s.get('uploader') or 'unknown'}, "
+                   f"ingested {s['ingested_at'][:10]} (confidence {s.get('confidence', '?')})")
     out += ["", "Notes with timestamps for each source live in `references/`.", ""]
     return "\n".join(out)
+
+
+def source_labels(sources: list[dict]) -> dict:
+    """Map each source's id and url to S1, S2 ... in Sources-list order."""
+    labels = {}
+    for i, s in enumerate(sources, 1):
+        for key in (s.get("id"), s.get("url")):
+            if key:
+                labels[key] = f"S{i}"
+    return labels
+
+
+def attribute_steps(procedure: list[dict], old: dict | None, new_src: dict) -> list[dict]:
+    """Give every step a `source` once a skill has several: a step carried over unchanged from the stored
+    version keeps (or inherits) the old source, anything else came from the source being merged in now."""
+    old_sources = (old or {}).get("sources", [])
+    if not old_sources:
+        return procedure
+    sole_old = (old_sources[0].get("id") or old_sources[0]["url"]) if len(old_sources) == 1 else None
+    known = {s["step"]: s.get("source") or sole_old for s in (old or {}).get("procedure", [])}
+    new_id = new_src.get("id") or new_src["url"]
+    out = []
+    for step in procedure:
+        if not step.get("source"):
+            step = {**step, "source": known.get(step["step"]) or new_id}
+        out.append(step)
+    return out
 
 
 def render_source_notes(d: dict, src: dict) -> str:
@@ -127,6 +157,10 @@ def render_note(d: dict, src: dict) -> str:
         out += ["## Takeaway", d["summary"].strip(), ""]
     if d.get("key_claims"):
         out += ["## Key points", *[f"- [{c.get('timestamp', '')}] {c['claim']}" for c in d["key_claims"]], ""]
+    if d.get("assumed_knowledge"):
+        out += ["## What the speaker assumes you know", *[f"- {a}" for a in d["assumed_knowledge"]], ""]
+    if d.get("contestable"):
+        out += ["## Contestable or unverified", *[f"- {c}" for c in d["contestable"]], ""]
     if d.get("apply_to_me"):
         out += ["## Worth trying", *[f"- {a}" for a in d["apply_to_me"]], ""]
     return "\n".join(out) + "\n"
@@ -175,12 +209,14 @@ def forge(d: dict, dry_run: bool) -> None:
     existing = json.loads(store.read_text(encoding="utf-8")) if store.is_file() else None
 
     # Sources accumulate; everything else is the latest distilled (Claude merges content before calling us).
-    sources = (existing or {}).get("sources", [])
+    sources = list((existing or {}).get("sources", []))   # a copy: `existing` must keep describing the stored version
     new_source = not any(s["url"] == src["url"] for s in sources)
     if new_source:
         sources.append(src)
     # Re-forging the same source with the same content re-renders the files but is not a new version.
     content = {k: v for k, v in d.items() if k != "source"}
+    if len(sources) > 1 and content.get("procedure"):
+        content["procedure"] = attribute_steps(content["procedure"], existing, src)
     old_content = {k: v for k, v in (existing or {}).items() if k not in ("sources", "forged_at", "version")}
     changed = existing is None or new_source or content != old_content
     merged = {**content, "sources": sources,
@@ -190,7 +226,8 @@ def forge(d: dict, dry_run: bool) -> None:
 
     skill_md = render_skill_md(merged)
     if dry_run:
-        print(f"# would {action} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)})\n")
+        verb = {"create": "would create", "update": "would update", "unchanged": "unchanged, would re-render"}[action]
+        print(f"# {verb} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)})\n")
         print(skill_md)
         return
 

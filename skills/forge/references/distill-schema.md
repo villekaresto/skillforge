@@ -49,7 +49,11 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
 - `verdict`, `source` always required. `source.url` required.
 - When `skill_worthy` is true: `slug`, `name`, `description`, `procedure` (3+ steps) required.
 - When false: `summary`, `key_claims`, `apply_to_me` are what make the learning note useful. `slug` optional (used for the note filename).
-- Timestamps as `M:SS` or `H:MM:SS`, matching the transcript.
+- Timestamps as `M:SS` or `H:MM:SS`, matching a transcript cue time (not a chapter time).
+- `procedure[].source` (optional): the `id` (or url) of the source a step comes from. Leave it out for a single-source skill.
+  On a merge, forge.py fills it in for you: steps carried over unchanged keep the earlier source, new or reworded steps get the
+  incoming source. Set it yourself when you reword an old step but its evidence is still the old video. Steps render as `(S2 1:14)`.
+- `verdict.confidence` on a merge is your confidence in the merged skill, and is also recorded as the new source's confidence.
 - `commands[].command` verbatim from the source. No invented flags.
 - On a merge, `sources` is managed by forge.py; still pass the single new `source`.
 - Keep `description` under 300 characters; it is what makes the skill trigger later.

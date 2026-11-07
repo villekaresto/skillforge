@@ -248,3 +248,37 @@ def test_whisper_language_codes_are_normalised():
     assert ingest.whisper_language("zh-Hans") == "zh"
     assert ingest.whisper_language("de") == "de"
     assert ingest.whisper_language(None) is None and ingest.whisper_language("und-x") == "und"
+
+
+def test_merge_attributes_steps_to_their_source(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    first = distilled()
+    f.write_text(json.dumps(first))
+    assert run_forge([str(f)], env).returncode == 0
+
+    second = distilled(url="https://example.com/v/def")
+    second["source"]["id"] = "def"
+    second["procedure"].insert(1, {"step": "One and a half", "timestamp": "1:14"})
+    f.write_text(json.dumps(second))
+    r = run_forge([str(f)], env)
+    assert json.loads(r.stdout)["written"] == "update"
+    md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
+    assert "**One** _(S1 0:10)_" in md and "**One and a half** _(S2 1:14)_" in md and "**Three** _(S1 0:30)_" in md
+    assert "- S1: [Demo video]" in md and "- S2: [Demo video]" in md
+    stored = json.loads((tmp_path / "skills" / "demo-task" / ".forge" / "skill.json").read_text())
+    assert [s["step"] for s in stored["procedure"]].count("One") == 1, "no duplicated steps after a merge"
+
+    r = run_forge([str(f)], env)          # merging the same second source again changes nothing
+    assert json.loads(r.stdout)["written"] == "unchanged"
+
+
+def test_note_keeps_caveats(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = distilled(worthy=False)
+    d["contestable"] = ["Title oversells this as B2B integration"]
+    d["assumed_knowledge"] = ["what a purchase order is"]
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    r = run_forge([str(f), "--dry-run"], env)
+    assert "Title oversells this as B2B integration" in r.stdout and "what a purchase order is" in r.stdout
