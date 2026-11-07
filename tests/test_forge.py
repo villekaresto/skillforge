@@ -428,3 +428,53 @@ def test_short_clips_get_fewer_frames(tmp_path):
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x240:d=20:r=25", str(video)], check=True)
     frames = ingest.extract_frames(video, tmp_path, max_frames=40, duration=20.0, width=320, no_dedup=True)
     assert 0 < len(frames) <= 8
+
+
+class FakeYtdlp:
+    """Stands in for yt-dlp: writes info.json always, subtitles only once `succeed_after` caption calls have failed."""
+    def __init__(self, out, succeed_after):
+        self.out, self.succeed_after, self.calls = out, succeed_after, []
+
+    def __call__(self, cmd, label):
+        self.calls.append(cmd)
+        (self.out / "media.info.json").write_text(json.dumps({"id": "abcdefghijk", "title": "T", "duration": 60}))
+        if len(self.calls) > self.succeed_after and "--write-auto-subs" in cmd:
+            (self.out / "media.en.vtt").write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhello\n")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 1, "", "ERROR: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests")
+
+
+def caption_env(tmp_path, monkeypatch, succeed_after):
+    out = tmp_path / "work"
+    out.mkdir()
+    fake = FakeYtdlp(out, succeed_after)
+    sleeps = []
+    monkeypatch.setattr(ingest, "HOME", tmp_path / "home")
+    monkeypatch.setattr(ingest, "ytdlp_base", lambda auth: ["yt-dlp"])
+    monkeypatch.setattr(ingest, "ytdlp_with_retry", fake)
+    monkeypatch.setattr(ingest.time, "sleep", sleeps.append)
+    return out, fake, sleeps
+
+
+def test_captions_are_retried_once_after_a_wait_before_whisper(tmp_path, monkeypatch):
+    out, fake, sleeps = caption_env(tmp_path, monkeypatch, succeed_after=2)   # manual + auto fail, retry succeeds
+    meta, segs, provenance, errors = ingest.fetch_captions("https://www.youtube.com/watch?v=abcdefghijk", out, "en", [])
+    assert sleeps == [ingest.CAPTION_RETRY_WAIT] and provenance == "auto" and segs and not errors
+
+
+def test_caption_failure_after_the_retry_is_reported(tmp_path, monkeypatch):
+    out, fake, sleeps = caption_env(tmp_path, monkeypatch, succeed_after=99)
+    meta, segs, provenance, errors = ingest.fetch_captions("https://www.youtube.com/watch?v=abcdefghijk", out, "en", [])
+    assert len(sleeps) == 1 and not segs and any("429" in e for e in errors)
+
+
+def test_info_json_is_cached_per_video_and_reused(tmp_path, monkeypatch):
+    out, fake, sleeps = caption_env(tmp_path, monkeypatch, succeed_after=0)
+    url = "https://www.youtube.com/watch?v=abcdefghijk&t=10"
+    ingest.fetch_captions(url, out, "en", [])
+    cache = tmp_path / "home" / "cache" / "youtube-abcdefghijk.info.json"
+    assert cache.is_file() and url in fake.calls[-1]
+    for f in out.iterdir():
+        f.unlink()
+    ingest.fetch_captions("https://youtu.be/abcdefghijk", out, "en", [])     # same video, other URL form
+    assert "--load-info-json" in fake.calls[-1] and url not in fake.calls[-1]

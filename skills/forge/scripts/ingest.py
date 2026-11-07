@@ -210,33 +210,67 @@ def caption_failure(r: subprocess.CompletedProcess) -> str | None:
     return None
 
 
-def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dict, list[dict], str | None, list[str]]:
-    base = ytdlp_base(auth) + ["--skip-download", "--write-info-json", "--sub-format", "vtt/srt/best",
-                               "--sub-langs", f"{lang},{lang}-*,{lang}.*", "-o", str(out / "media.%(ext)s"), url]
-    # Pass 1: manual captions only, so provenance is certain.
+CAPTION_RETRY_WAIT = float(os.environ.get("SKILLFORGE_CAPTION_RETRY_WAIT", "30"))
+INFO_CACHE_TTL = 6 * 3600          # YouTube's signed subtitle URLs inside info.json expire after roughly six hours
+
+
+def video_key(url: str) -> str:
+    """A stable cache key: the YouTube video id when there is one, otherwise a hash of the URL."""
+    m = re.search(r"(?:[?&]v=|youtu\.be/|/shorts/|/live/)([\w-]{11})", url)
+    return f"youtube-{m.group(1)}" if m else "url-" + hashlib.sha1(url.encode()).hexdigest()[:16]
+
+
+def info_cache_path(url: str) -> Path:
+    return HOME / "cache" / f"{video_key(url)}.info.json"
+
+
+def caption_passes(base: list[str], out: Path) -> tuple[list[Path], str | None, list[str], subprocess.CompletedProcess]:
+    """Manual captions first (provenance certain), then auto captions."""
+    out_glob = lambda: sorted(out.glob("media*.vtt")) + sorted(out.glob("media*.srt"))
+    errors: list[str] = []
     r = ytdlp_with_retry([*base, "--write-subs"], "captions")
+    subs = out_glob()
+    if subs:
+        return subs, "manual", [], r
+    if fail := caption_failure(r):
+        errors.append(f"captions: {fail}")
+    r = ytdlp_with_retry([*base, "--write-auto-subs"], "auto captions")
+    subs = out_glob()
+    if subs:
+        return subs, "auto", [], r
+    if fail := caption_failure(r):
+        errors.append(f"auto captions: {fail}")
+    return [], None, errors, r
+
+
+
+def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dict, list[dict], str | None, list[str]]:
+    tail_args = ["--skip-download", "--write-info-json", "--sub-format", "vtt/srt/best",
+                 "--sub-langs", f"{lang},{lang}-*,{lang}.*", "-o", str(out / "media.%(ext)s")]
+    cache = info_cache_path(url)
+    fresh = cache.is_file() and time.time() - cache.stat().st_mtime < INFO_CACHE_TTL
+    # A fresh cached info.json skips YouTube's player request (the call that trips bot checks); captions still download.
+    base = ytdlp_base(auth) + tail_args + (["--load-info-json", str(cache)] if fresh else [url])
+    subs, provenance, errors, r = caption_passes(base, out)
+    if not list(out.glob("media*.info.json")) and fresh:
+        log("cached metadata was rejected; fetching it again")
+        base = ytdlp_base(auth) + tail_args + [url]
+        subs, provenance, errors, r = caption_passes(base, out)
     info_files = list(out.glob("media*.info.json"))
     if not info_files:
         hint = "   Try --cookies-from-browser firefox for private or age-restricted sources." if "Sign in" in r.stderr or "Private" in r.stderr else ""
         die(f"yt-dlp could not read this URL.\n{r.stderr.strip()[-1200:]}{hint}")
-    info = json.loads(info_files[0].read_text(encoding="utf-8"))
-    subs = sorted(out.glob("media*.vtt")) + sorted(out.glob("media*.srt"))
-    provenance = "manual" if subs else None
-    errors: list[str] = []
-    if not subs and (fail := caption_failure(r)):
-        errors.append(f"captions: {fail}")
-    if not subs:
-        r = ytdlp_with_retry([*base, "--write-auto-subs"], "auto captions")
-        if r.returncode and "429" in r.stderr:
-            log("auto captions: HTTP 429 from YouTube, waiting 30 s and trying once more")
-            time.sleep(30)
-            r = run([*base, "--write-auto-subs"], timeout=600)
-        subs = sorted(out.glob("media*.vtt")) + sorted(out.glob("media*.srt"))
-        provenance = "auto" if subs else None
-        if not subs and (fail := caption_failure(r)):
-            errors.append(f"auto captions: {fail}")
+    if not subs and errors:
+        # Caption downloads fail transiently (HTTP 429 above all). One patient retry before falling back to transcription.
+        log(f"captions failed ({errors[-1][:120]}); waiting {CAPTION_RETRY_WAIT:.0f} s and trying once more")
+        time.sleep(CAPTION_RETRY_WAIT)
+        subs, provenance, errors, r = caption_passes(base, out)
     for e in errors if not subs else []:
         log(e)
+    info = json.loads(info_files[0].read_text(encoding="utf-8"))
+    if not fresh:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(info_files[0], cache)
     meta = {
         "url": info.get("webpage_url") or url, "id": info.get("id"), "title": info.get("title"),
         "uploader": info.get("uploader") or info.get("channel"), "duration": info.get("duration"),
