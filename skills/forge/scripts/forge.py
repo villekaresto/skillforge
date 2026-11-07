@@ -157,6 +157,9 @@ def render_note(d: dict, src: dict) -> str:
         out += ["## Takeaway", d["summary"].strip(), ""]
     if d.get("key_claims"):
         out += ["## Key points", *[f"- [{c.get('timestamp', '')}] {c['claim']}" for c in d["key_claims"]], ""]
+    if d.get("procedure"):
+        out += ["## Steps shown (not forged as a skill)",
+                *[f"{i}. {st['step']}" + (f" ({st['timestamp']})" if st.get("timestamp") else "") for i, st in enumerate(d["procedure"], 1)], ""]
     if d.get("assumed_knowledge"):
         out += ["## What the speaker assumes you know", *[f"- {a}" for a in d["assumed_knowledge"]], ""]
     if d.get("contestable"):

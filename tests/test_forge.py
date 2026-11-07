@@ -282,6 +282,7 @@ def test_note_keeps_caveats(tmp_path, monkeypatch):
     f.write_text(json.dumps(d))
     r = run_forge([str(f), "--dry-run"], env)
     assert "Title oversells this as B2B integration" in r.stdout and "what a purchase order is" in r.stdout
+    assert "## Steps shown" in r.stdout and "2. Two (0:20)" in r.stdout
 
 
 def test_scene_cuts_in_a_transition_collapse_to_one_settled_frame():
