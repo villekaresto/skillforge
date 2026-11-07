@@ -46,7 +46,7 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
 
 ## Field rules
 
-- `verdict`, `source` always required. `source.url` required.
+- `verdict` and either `source` (one video) or `sources` (a playlist cluster: several videos, one skill) are required; every source needs a `url`.
 - When `skill_worthy` is true: `slug`, `name`, `description`, `procedure` (3+ steps) required.
 - When false: `summary`, `key_claims`, `apply_to_me` are what make the learning note useful. `slug` optional (used for the note filename).
 - Timestamps as `M:SS` or `H:MM:SS`, matching a transcript cue time (not a chapter time).
@@ -65,5 +65,10 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
   `references/frames/<source id>/` and links them from that source's notes. Recorded per source; it never changes the skill's content. Notes do not copy frames, so it has no effect on a note.
 - `verdict.confidence` on a merge is your confidence in the merged skill, and is also recorded as the new source's confidence.
 - `commands[].command` verbatim from the source. No invented flags.
-- On a merge, `sources` is managed by forge.py; still pass the single new `source`.
+- On a merge into an existing skill, pass the single new `source`; forge.py keeps the stored ones. A playlist cluster passes
+  `"sources": [{url, id, title, uploader, duration, ingested_at, work_dir, useless_frames}, ...]` (copy each entry's `source`
+  record from `playlist.json`; `work_dir` is relative to the playlist folder) and may set `confidence` per source.
+  Clusters are for skills only: a note covers one video.
+- Every `source`/`refs[].source` cited anywhere must be an id (or url) of one of the skill's sources; forge.py refuses unknown ones.
+- `key_claims[].source` (optional) files a claim under that video's source notes only.
 - Keep `description` under 300 characters; it is what makes the skill trigger later.

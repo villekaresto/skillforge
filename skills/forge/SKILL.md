@@ -109,7 +109,7 @@ In a batch, write (forge) the first source on a task before distilling the next 
 
 ### Playlist mode: one skill per task, not per video
 
-For a playlist or channel URL, use `scripts/playlist.py` instead of `ingest.py` (which only lists the entries for such a URL):
+For a playlist or channel URL, use `scripts/playlist.py` instead of `ingest.py` (which only lists the entries for such a URL). Running it again with the same `--out-dir` and more `--select` entries extends the run and re-proposes clusters over everything:
 
 ```
 python3 scripts/playlist.py "<playlist url>" [--limit 10 | --select 2,5,7] [ingest flags such as --frames 30]
@@ -119,8 +119,8 @@ It ingests each entry into `<playlist dir>/NN-<id>/`, pacing requests, and write
 
 1. Tell the user the count; for a long playlist, ingest only the entries whose titles promise a procedure unless they ask for all.
 2. Study every entry as usual (all of each transcript, the frames).
-3. Fix the clusters: one cluster per TASK. Split a cluster that mixes tasks; join videos the helper missed; drop entries that are not skill-worthy (they get a note each, reusing a topic slug).
-4. For each skill-worthy cluster write `<playlist dir>/<slug>.distilled.json` with `"sources": [{url, id, title, uploader, duration, ingested_at, work_dir, useless_frames}]` (work_dir relative to the playlist dir) and `refs` on every step that names the videos showing it. If the slug already exists as a skill, merge into it as usual.
+3. Fix the clusters: one cluster per TASK. Split a cluster that mixes tasks; join videos the helper missed; drop entries that are not skill-worthy (each gets its own distilled.json as a note; videos on the same topic share the note slug, so one note file per topic, never one for the whole playlist).
+4. For each skill-worthy cluster write `<playlist dir>/<slug>.distilled.json` with `"sources"`: copy each entry's `source` record from `playlist.json` and add its `useless_frames`. Give claims a `source` when they come from one video and `refs` on every step that names the videos showing it. If the slug already exists as a skill, merge into it as usual.
 5. One combined dry-run over everything: `python3 scripts/forge.py <playlist dir>/*.distilled.json <note files> --dry-run`. Show it, then write with the same command without `--dry-run`.
 
 Give a one-line verdict per video and per cluster at the end.

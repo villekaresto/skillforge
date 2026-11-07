@@ -196,8 +196,10 @@ def source_key(src: dict) -> str:
 def render_source_notes(d: dict, src: dict, frames: list[str] | None = None) -> str:
     out = [f"# Source notes: {src.get('title') or src['url']}", "", f"- URL: {src['url']}", f"- By: {src.get('uploader') or 'unknown'}",
            f"- Ingested: {src['ingested_at']}", f"- Verdict: {d['verdict']['reason']}", ""]
-    if d.get("key_claims"):
-        out += ["## Key claims", *[claim_line(c) for c in d["key_claims"]], ""]
+    mine = {src.get("id"), src["url"]} - {None}
+    claims = [c for c in d.get("key_claims") or [] if not c.get("source") or c["source"] in mine]   # a claim may name its video
+    if claims:
+        out += ["## Key claims", *[claim_line(c) for c in claims], ""]
     if d.get("assumed_knowledge"):
         out += ["## What the speaker assumes you know", *[f"- {a}" for a in d["assumed_knowledge"]], ""]
     if d.get("contestable"):
@@ -334,6 +336,16 @@ def lint(d: dict, skill_md: str) -> list[str]:
     return out
 
 
+def unknown_citations(d: dict, sources: list[dict]) -> list[str]:
+    """Source ids cited by steps, pitfalls, decision points or claims that match none of the skill's sources:
+    a typo would otherwise silently lose its S-label."""
+    known = {x for s in sources for x in (s.get("id"), s.get("url")) if x}
+    items = [*(d.get("procedure") or []), *[p for p in d.get("pitfalls") or [] if isinstance(p, dict)],
+             *(d.get("decision_points") or []), *(d.get("key_claims") or [])]
+    cited = {r.get("source") for it in items for r in (it.get("refs") or [])} | {it.get("source") for it in items}
+    return sorted(c for c in cited - {None} if c not in known)
+
+
 def dropped_steps(existing: dict | None, procedure: list[dict], incoming_ids: set) -> list[str]:
     """Stored steps that cite a source other than the incoming ones and are missing from the new procedure.
     That is what re-forging an old single-source distilled.json over a merged skill looks like."""
@@ -414,6 +426,9 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
         else:                                    # same source re-studied: its confidence and frame verdicts may have changed
             refreshed = {k: src[k] for k in ("confidence", "useless_frames") if k in src}
             sources = [{**s, **refreshed} if s["url"] == src["url"] else s for s in sources]
+    unknown = unknown_citations(d, sources)
+    if unknown:
+        die(f"citations name sources this skill does not have: {unknown}. Use each source's id (or url) exactly.")
     # Re-forging the same source with the same content re-renders the files but is not a new version.
     content = {k: v for k, v in d.items() if k not in ("source", "sources", "useless_frames")}   # frame verdicts belong to sources
     ids = {x for s in incoming for x in (s.get("id"), s["url"]) if x}

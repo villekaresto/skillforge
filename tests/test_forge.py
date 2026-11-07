@@ -710,3 +710,29 @@ def test_dry_run_lints_loose_skills(tmp_path, monkeypatch):
     tight["verification"] = ["The field shows the new value after saving"]
     f.write_text(json.dumps(tight))
     assert "# lint" not in run_forge([str(f), "--dry-run"], env).stdout
+
+
+def test_citations_must_name_real_sources_and_claims_go_to_their_video(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = cluster_distilled(tmp_path)
+    d["procedure"][1]["source"] = "bbbb"                               # typo
+    (tmp_path / "c.json").write_text(json.dumps(d))
+    r = run_forge([str(tmp_path / "c.json"), "--dry-run"], env)
+    assert r.returncode == 2 and "['bbbb']" in r.stderr
+    d = cluster_distilled(tmp_path)
+    d["key_claims"] = [{"claim": "Only in A", "timestamp": "0:12", "source": "aaa"}, {"claim": "General", "timestamp": "0:20"}]
+    (tmp_path / "c.json").write_text(json.dumps(d))
+    assert run_forge([str(tmp_path / "c.json")], env).returncode == 0
+    refs = tmp_path / "skills" / "demo-task" / "references"
+    a, b = (refs / "source-aaa.md").read_text(), (refs / "source-bbb.md").read_text()
+    assert "Only in A" in a and "Only in A" not in b and "General" in a and "General" in b
+
+
+def test_playlist_manifest_source_record_is_copy_ready(tmp_path):
+    import playlist
+    (tmp_path / "03-abc").mkdir()
+    (tmp_path / "03-abc" / "source.json").write_text(json.dumps({"meta": {"url": "https://y/watch?v=abc", "id": "abc", "title": "T",
+        "uploader": "U", "duration": 258, "ingested_at": "2026-11-07T10:00:00+00:00", "description": "long"}}))
+    rec = playlist.source_record(tmp_path / "03-abc", "03-abc")
+    assert rec == {"url": "https://y/watch?v=abc", "id": "abc", "title": "T", "uploader": "U", "duration": 258,
+                   "ingested_at": "2026-11-07T10:00:00+00:00", "work_dir": "03-abc"}
