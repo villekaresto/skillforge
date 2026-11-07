@@ -2,6 +2,12 @@
 
 Generated from the git history. Dates are 2026-11-07 unless noted; all work happened in one day of QA-driven iteration.
 
+## 0.3.0
+
+- **User profile.** `~/.skillforge/profile.md` (or `SKILLFORGE_PROFILE`) holds your role, tools with versions, core work, context and "not relevant" topics. `/forge` reads it first (`forge.py --profile`). The judge's "central to your work" test and `apply_to_me` use it, and an empty `apply_to_me` is flagged when a profile exists. Only `references/profile.example.md`, with placeholders, ships; `profile.md` is git-ignored.
+- **Version-mismatch pitfalls.** Sources record `versions_shown`. When a major version differs from the profile's, forge.py adds a `symptom → cause → fix` pitfall to the skill (or note), regenerated on every forge so re-runs stay idempotent.
+- **Privacy.** Repository history rewritten. Examples, tests and docs are neutral; QA docs keep only aggregate numbers; author and committer are `skillforge`.
+
 ## 0.2.0
 
 **New**

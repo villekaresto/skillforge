@@ -25,6 +25,52 @@ HOME = Path(os.environ.get("SKILLFORGE_HOME", Path.home() / ".skillforge"))
 SKILLS_DIR = Path(os.environ.get("SKILLFORGE_SKILLS_DIR", Path.home() / ".claude" / "skills"))
 NOTES_DIR = HOME / "notes"
 CATALOG = HOME / "catalog.json"
+PROFILE = Path(os.environ.get("SKILLFORGE_PROFILE", HOME / "profile.md"))
+PROFILE_EXAMPLE = Path(__file__).resolve().parent.parent / "references" / "profile.example.md"
+
+
+# --------------------------------------------------------------------------- user profile
+
+def load_profile() -> dict | None:
+    """The user's profile (~/.skillforge/profile.md): free text Claude reads before judging, plus a `## Tools` list
+    of `- Name: version` lines that forge.py compares with the versions a source shows."""
+    if not PROFILE.is_file():
+        return None
+    text = PROFILE.read_text(encoding="utf-8")
+    tools: dict = {}
+    section = None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            section = line[3:].strip().lower()
+            continue
+        m = re.match(r"\s*[-*]\s*([^:<>]+?)\s*:\s*([^<>#]+?)\s*(?:#.*)?$", line)
+        if section == "tools" and m:
+            tools[m.group(1).strip().lower()] = m.group(2).strip()
+    return {"path": str(PROFILE), "text": text, "tools": tools}
+
+
+def major(version: str) -> str:
+    m = re.search(r"\d+", version or "")
+    return m.group(0) if m else (version or "").strip().lower()
+
+
+def version_pitfalls(sources: list[dict], profile: dict | None) -> list[dict]:
+    """One pitfall per tool whose version in a source differs from the user's profile (major versions compared)."""
+    if not profile or not profile["tools"]:
+        return []
+    out, seen = [], set()
+    for src in sources:
+        for tool, shown in (src.get("versions_shown") or {}).items():
+            mine = profile["tools"].get(tool.strip().lower())
+            if not mine or major(str(shown)) == major(mine) or (tool.lower(), str(shown)) in seen:
+                continue
+            seen.add((tool.lower(), str(shown)))
+            item = {"text": f"Menus, defaults or labels differ from what the source shows → it uses {tool} {shown}, your profile says "
+                            f"{mine} → check each step against your version before relying on it", "auto": "version"}
+            if src.get("id") or src.get("url"):
+                item["source"] = src.get("id") or src["url"]
+            out.append(item)
+    return out
 
 
 def die(msg: str, code: int = 2) -> None:
@@ -441,6 +487,10 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
         slug = slugify(d.get("slug") or re.sub(r"[^a-z0-9]+", "-", (src.get("title") or "note").lower())[:50])
         # One file per topic slug; each source is a dated section, replaced when the same source is re-studied.
         path = NOTES_DIR / f"{slug}.md"
+        profile = load_profile()
+        mismatch = version_pitfalls([src], profile)
+        if mismatch:
+            d = {**d, "pitfalls": [p for p in d.get("pitfalls") or [] if not (isinstance(p, dict) and p.get("auto"))] + mismatch}
         section = render_note(d, src)
         current = (pending or {}).get(path, path.read_text(encoding="utf-8") if path.is_file() else None)
         text, action = upsert_note(current, slug, src["url"], section)
@@ -474,13 +524,19 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
             sources.append(public(src))
             new_source = True
         else:                                    # same source re-studied: its confidence and frame verdicts may have changed
-            refreshed = {k: src[k] for k in ("confidence", "useless_frames") if k in src}
+            refreshed = {k: src[k] for k in ("confidence", "useless_frames", "versions_shown") if k in src}
             sources = [{**s, **refreshed} if s["url"] == src["url"] else s for s in sources]
     unknown = unknown_citations(d, sources)
     if unknown:
         die(f"citations name sources this skill does not have: {unknown}. Use each source's id (or url) exactly.")
     # Re-forging the same source with the same content re-renders the files but is not a new version.
     content = {k: v for k, v in d.items() if k not in ("source", "sources", "useless_frames")}   # frame verdicts belong to sources
+    # Version-mismatch pitfalls are generated from the sources and the profile on every forge, never hand-written.
+    profile = load_profile()
+    generated = version_pitfalls(sources, profile)
+    kept = [p for p in content.get("pitfalls") or [] if not (isinstance(p, dict) and p.get("auto") == "version")]
+    if kept or generated:
+        content["pitfalls"] = kept + generated
     ids = {x for s in incoming for x in (s.get("id"), s["url"]) if x}
     lost = dropped_steps(existing, content.get("procedure", []), ids)
     if lost and not allow_drop:
@@ -509,6 +565,10 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
             print(f"# warning: {len(uncited)} step(s) cite no source in a multi-source skill: {uncited[:3]}")
         for w in lint(merged, skill_md):
             print(f"# lint: {w}")
+        for p in generated:
+            print(f"# profile: version mismatch added as a pitfall: {p['text']}")
+        if profile and not merged.get("apply_to_me"):
+            print("# profile: apply_to_me is empty although a profile exists; tie the skill to the user's tools and work")
         print()
         print(skill_md)
         return
@@ -551,7 +611,16 @@ def main() -> None:
     ap.add_argument("--show", metavar="SLUG")
     ap.add_argument("--adopt-note", metavar="FILE", nargs="+", help="move pre-0.1.3 per-video notes into --topic")
     ap.add_argument("--topic", metavar="SLUG", help="topic note slug for --adopt-note")
+    ap.add_argument("--profile", action="store_true", help="print the user profile read before judging (or how to create one)")
     a = ap.parse_args()
+    if a.profile:
+        prof = load_profile()
+        if prof:
+            print(f"# profile: {prof['path']}  (tools parsed: {json.dumps(prof['tools'])})\n")
+            print(prof["text"])
+        else:
+            print(f"# no profile at {PROFILE}. Copy {PROFILE_EXAMPLE} there and fill it in, or judge without one.")
+        return
     if a.adopt_note:
         if not a.topic:
             ap.error("--adopt-note needs --topic SLUG")

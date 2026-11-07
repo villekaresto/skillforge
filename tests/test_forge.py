@@ -869,3 +869,70 @@ def test_lint_flags_demo_values_in_instructions(tmp_path, monkeypatch):
     (tmp_path / "d.json").write_text(json.dumps(d))
     out = run_forge([str(tmp_path / "d.json"), "--dry-run"], env).stdout
     assert "# lint: demo values in step 2" in out
+
+
+PROFILE_TEXT = """# profile
+## Role
+Example role
+## Tools
+- PostgreSQL: 16
+- ExampleERP: 17.0   # self-hosted
+## Core work
+- nightly backups
+"""
+
+
+def profile_env(tmp_path, monkeypatch, text=PROFILE_TEXT):
+    env = env_for(tmp_path, monkeypatch)
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "profile.md").write_text(text)
+    return env
+
+
+def test_profile_tools_are_parsed_and_printed(tmp_path, monkeypatch):
+    env = profile_env(tmp_path, monkeypatch)
+    out = run_forge(["--profile"], env).stdout
+    assert '"postgresql": "16"' in out and '"exampleerp": "17.0"' in out and "Example role" in out
+    env2 = env_for(tmp_path / "other", monkeypatch)
+    assert "no profile at" in run_forge(["--profile"], env2).stdout
+
+
+def test_version_mismatch_with_profile_becomes_a_pitfall_and_is_idempotent(tmp_path, monkeypatch):
+    env = profile_env(tmp_path, monkeypatch)
+    d = distilled()
+    d["source"]["versions_shown"] = {"ExampleERP": "19", "PostgreSQL": "16.2"}
+    d["apply_to_me"] = ["Use it for the nightly backup"]
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    dry = run_forge([str(f), "--dry-run"], env).stdout
+    assert "# profile: version mismatch" in dry and "ExampleERP 19" in dry and "PostgreSQL 16.2" not in dry
+    assert run_forge([str(f)], env).returncode == 0
+    md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
+    assert "it uses ExampleERP 19, your profile says 17.0" in md
+    assert json.loads(run_forge([str(f)], env).stdout)["written"] == "unchanged"
+
+
+def test_profile_without_apply_to_me_is_flagged(tmp_path, monkeypatch):
+    env = profile_env(tmp_path, monkeypatch)
+    d = distilled()
+    d.pop("apply_to_me")
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    assert "apply_to_me is empty although a profile exists" in run_forge([str(f), "--dry-run"], env).stdout
+
+
+def test_no_profile_means_no_version_pitfalls(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = distilled()
+    d["source"]["versions_shown"] = {"ExampleERP": "19"}
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    out = run_forge([str(f), "--dry-run"], env).stdout
+    assert "# profile" not in out and "your profile says" not in out
+
+
+def test_only_the_example_profile_ships():
+    refs = ROOT / "skills" / "forge" / "references"
+    assert (refs / "profile.example.md").is_file()
+    assert "<Tool name>: <version>" in (refs / "profile.example.md").read_text()
+    assert not list(ROOT.rglob("profile.md")), "a real profile must never be committed"

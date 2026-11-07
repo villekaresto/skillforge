@@ -42,6 +42,8 @@ Pick a short tutorial that shows a procedure end to end (a software setting, a d
 /forge what did I learn from <url>    # works for podcasts and talks too; most become notes
 ```
 
+**5. Optional: tell it about you.** Copy `skills/forge/references/profile.example.md` to `~/.skillforge/profile.md` and fill in your tools (with versions), core work and context. The judge then knows what is central to your work, `apply_to_me` refers to your own tasks, and a source shown on a different version of one of your tools gets a pitfall saying so. The profile stays on your machine.
+
 ## What it decides, and why
 
 Most videos should not become skills. A skill is loaded whenever it triggers, so a vague one costs you more than a missing one. A source becomes a skill only when it has a concrete procedure of at least 3 steps that you would repeat, it adds something Claude doesn't already know (version-specific paths, real pitfalls, numbers, checks), and the evidence actually shows the key step. Everything else becomes a note in `~/.skillforge/notes/<topic>.md`, with one dated section per source.

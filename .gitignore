@@ -7,3 +7,4 @@ __pycache__/
 dist/
 qa-home/
 *.tar.gz
+profile.md
