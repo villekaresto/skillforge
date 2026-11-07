@@ -220,33 +220,68 @@ def render_commands(d: dict) -> str:
 
 
 def render_note(d: dict, src: dict) -> str:
+    """One dated section of a topic note; sub-headings are ### so sections stack in one file."""
     v = d["verdict"]
-    out = [f"# {src.get('title') or src['url']}", "", f"- URL: {src['url']}", f"- By: {src.get('uploader') or 'unknown'}",
-           f"- Date: {today()}", f"- Skill-worthy: no (confidence {v.get('confidence')})", f"- Why: {v['reason']}", ""]
+    out = [f"{NOTE_MARK}{src['url']} -->", f"## {today()} · {src.get('title') or src['url']}", "", f"- URL: {src['url']}", f"- By: {src.get('uploader') or 'unknown'}",
+           f"- Skill-worthy: no (confidence {v.get('confidence')})", f"- Why: {v['reason']}", ""]
     if d.get("summary"):
-        out += ["## Takeaway", d["summary"].strip(), ""]
+        out += ["### Takeaway", d["summary"].strip(), ""]
     if d.get("key_claims"):
-        out += ["## Key points", *[claim_line(c) for c in d["key_claims"]], ""]
+        out += ["### Key points", *[claim_line(c) for c in d["key_claims"]], ""]
     if d.get("procedure"):
-        out += ["## Steps shown (not forged as a skill)",
+        out += ["### Steps shown (not forged as a skill)",
                 *[f"{i}. {st['step']}" + (f" ({st['timestamp']})" if st.get("timestamp") else "") for i, st in enumerate(d["procedure"], 1)], ""]
     if d.get("pitfalls"):
-        out += ["## Pitfalls", *[f"- {item_text(p)}" + (f" ({p['timestamp']})" if isinstance(p, dict) and p.get("timestamp") else "")
+        out += ["### Pitfalls", *[f"- {item_text(p)}" + (f" ({p['timestamp']})" if isinstance(p, dict) and p.get("timestamp") else "")
                                  for p in d["pitfalls"]], ""]
     if d.get("verification"):
-        out += ["## How to check", *[f"- {v}" for v in d["verification"]], ""]
+        out += ["### How to check", *[f"- {v}" for v in d["verification"]], ""]
     if d.get("commands"):
-        out += ["## Commands shown (transcribed, review before running)"]
+        out += ["### Commands shown (transcribed, review before running)"]
         for c in d["commands"]:
             out += [f"{c.get('description', 'command')} _({c.get('timestamp', '')})_", "", "```" + (c.get("language") or ""),
                     c["command"].rstrip(), "```", ""]
     if d.get("assumed_knowledge"):
-        out += ["## What the speaker assumes you know", *[f"- {a}" for a in d["assumed_knowledge"]], ""]
+        out += ["### What the speaker assumes you know", *[f"- {a}" for a in d["assumed_knowledge"]], ""]
     if d.get("contestable"):
-        out += ["## Contestable or unverified", *[f"- {c}" for c in d["contestable"]], ""]
+        out += ["### Contestable or unverified", *[f"- {c}" for c in d["contestable"]], ""]
     if d.get("apply_to_me"):
-        out += ["## Worth trying", *[f"- {a}" for a in d["apply_to_me"]], ""]
+        out += ["### Worth trying", *[f"- {a}" for a in d["apply_to_me"]], ""]
+    out.append(NOTE_END)
     return "\n".join(out) + "\n"
+
+
+NOTE_MARK = "<!-- forge-note: "
+NOTE_END = "<!-- /forge-note -->"
+
+
+def note_sections(text: str) -> list[tuple[str, str]]:
+    """(url, section text) for every section in a topic note file."""
+    return [(m.group(1), m.group(0)) for m in re.finditer(r"<!-- forge-note: (\S+) -->.*?<!-- /forge-note -->\n?", text, re.S)]
+
+
+def remove_note_section(path: Path, url: str) -> None:
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    for u, sec in note_sections(text):
+        if u == url:
+            text = text.replace(sec, "")
+    if note_sections(text):
+        path.write_text(text, encoding="utf-8")
+    elif NOTE_MARK in path.read_text(encoding="utf-8"):
+        path.unlink()                                                      # that topic file held only this source
+
+
+def upsert_note(text: str | None, slug: str, url: str, section: str) -> tuple[str, str]:
+    """Insert or replace this source's section in a topic note. Returns (new text, action)."""
+    if not text:
+        title = slug.replace("-", " ").capitalize()
+        return f"# {title}\n\nLearning notes on one topic, one dated section per source. Written by /forge.\n\n{section}", "create"
+    for u, sec in note_sections(text):
+        if u == url:
+            return text.replace(sec, section), "update"
+    return text.rstrip("\n") + "\n\n" + section, "append"
 
 
 # --------------------------------------------------------------------------- forging
@@ -294,23 +329,23 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
 
     if not d["verdict"]["skill_worthy"]:
         slug = slugify(d.get("slug") or re.sub(r"[^a-z0-9]+", "-", (src.get("title") or "note").lower())[:50])
-        # The same source keeps its note (re-studying it rewrites the file); a different source never overwrites one.
-        previous = next((n for n in cat["notes"] if n.get("url") == src["url"]), None)
-        path = Path(previous["file"]) if previous else NOTES_DIR / f"{today()}-{slug}.md"
-        n = 2
-        while not previous and path.exists():
-            path = NOTES_DIR / f"{today()}-{slug}-{n}.md"
-            n += 1
-        text = render_note(d, src)
+        # One file per topic slug; each source is a dated section, replaced when the same source is re-studied.
+        path = NOTES_DIR / f"{slug}.md"
+        section = render_note(d, src)
+        text, action = upsert_note(path.read_text(encoding="utf-8") if path.is_file() else None, slug, src["url"], section)
         if dry_run:
-            print(f"# would {'rewrite' if previous else 'write'} learning note {path}\n\n{text}")
+            verb = {"create": "would create", "update": "would update this source's section in", "append": "would append to"}[action]
+            print(f"# {verb} learning note {path}\n\n{section}")
             return
         NOTES_DIR.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+        for prev in [x for x in cat["notes"] if x.get("url") == src["url"] and Path(x["file"]) != path]:
+            remove_note_section(Path(prev["file"]), src["url"])           # the source moved to another topic
         cat["notes"] = [x for x in cat["notes"] if x.get("url") != src["url"]]
-        cat["notes"].append({"date": today(), "url": src["url"], "title": src.get("title"), "file": str(path), "reason": d["verdict"]["reason"]})
+        cat["notes"].append({"date": today(), "url": src["url"], "title": src.get("title"), "slug": slug, "file": str(path),
+                             "reason": d["verdict"]["reason"]})
         save_catalog(cat)
-        print(json.dumps({"written": "note", "path": str(path)}, indent=2))
+        print(json.dumps({"written": "note", "action": action, "path": str(path)}, indent=2))
         return
 
     slug = slugify(d["slug"])

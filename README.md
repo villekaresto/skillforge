@@ -53,7 +53,7 @@ Private or age-restricted sources: `--cookies-from-browser firefox` (or chrome, 
 | | |
 |---|---|
 | Forged skills | `~/.claude/skills/<slug>/` (SKILL.md, references/, .forge/skill.json) |
-| Learning notes | `~/.skillforge/notes/` |
+| Learning notes | `~/.skillforge/notes/<topic>.md` (one dated section per source) |
 | Catalog | `~/.skillforge/catalog.json` |
 | Evidence working files | `~/.skillforge/work/<timestamp>/` (safe to delete) |
 

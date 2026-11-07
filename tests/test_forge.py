@@ -399,20 +399,34 @@ def test_whisper_language_comes_from_the_user_not_youtube_metadata():
     assert 'whisper_language(meta.get("language")' not in src
 
 
-def test_notes_never_overwrite_another_source_and_never_duplicate(tmp_path, monkeypatch):
+def test_one_note_file_per_topic_with_a_section_per_source(tmp_path, monkeypatch):
     env = env_for(tmp_path, monkeypatch)
     f = tmp_path / "d.json"
     a = distilled(worthy=False)
     f.write_text(json.dumps(a))
-    assert run_forge([str(f)], env).returncode == 0
-    assert run_forge([str(f)], env).returncode == 0                  # same source again: same file, one entry
-    b = distilled(url="https://example.com/v/other", worthy=False)    # same slug, different source
+    assert json.loads(run_forge([str(f)], env).stdout)["action"] == "create"
+    a["summary"] = "Re-studied summary."
+    f.write_text(json.dumps(a))
+    assert json.loads(run_forge([str(f)], env).stdout)["action"] == "update"   # same source: its section is replaced
+    b = distilled(url="https://example.com/v/other", worthy=False)
+    b["source"]["title"] = "Second video"
+    f.write_text(json.dumps(b))
+    r = run_forge([str(f), "--dry-run"], env)
+    assert "would append to learning note" in r.stdout
+    assert json.loads(run_forge([str(f)], env).stdout)["action"] == "append"
+    notes = list((tmp_path / "home" / "notes").glob("*.md"))
+    assert [n.name for n in notes] == ["demo-task.md"]
+    text = notes[0].read_text()
+    assert text.count("<!-- forge-note: ") == 2 and "Re-studied summary." in text and "A summary." in text
+    assert sum(l.startswith("## ") for l in text.splitlines()) == 2 and "· Demo video" in text and "· Second video" in text
+    cat = json.loads((tmp_path / "home" / "catalog.json").read_text())
+    assert len(cat["notes"]) == 2 and {n["file"] for n in cat["notes"]} == {str(notes[0])}
+
+    b["slug"] = "another-topic"                                    # the second source is re-filed under another topic
     f.write_text(json.dumps(b))
     assert run_forge([str(f)], env).returncode == 0
-    notes = sorted((tmp_path / "home" / "notes").glob("*.md"))
-    assert len(notes) == 2 and any(n.name.endswith("-demo-task-2.md") for n in notes)
-    cat = json.loads((tmp_path / "home" / "catalog.json").read_text())
-    assert [n["url"] for n in cat["notes"]].count(a["source"]["url"]) == 1 and len(cat["notes"]) == 2
+    assert notes[0].read_text().count("<!-- forge-note: ") == 1
+    assert (tmp_path / "home" / "notes" / "another-topic.md").is_file()
 
 
 def test_slug_hint_transliterates_accents():

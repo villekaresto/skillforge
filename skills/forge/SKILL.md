@@ -62,7 +62,7 @@ A skill is a reusable procedure Claude can apply later. Say yes only when ALL ho
 
 Say no for: vlogs, news, opinion pieces, product reviews without a method, entertainment, interviews with no procedure, content too shallow to reproduce. A "no" is a good outcome; file a learning note with the real takeaways and move on. Do not inflate thin content into a skill. For pure entertainment (music, comedy, vlogs) keep the note to the verdict and a two-sentence summary; for a long interview, 10–30 timestamped claims is the useful range.
 
-A second source on a task that so far only has a note: if together they now clear the bar, forge a skill from both; otherwise file the new note under its own slug (forge.py never overwrites another source's note).
+A second source on a task that so far only has a note: if together they now clear the bar, forge a skill from both; otherwise reuse the existing note's slug: the new source is appended as its own dated section.
 
 Give a confidence 0.0–1.0. Below 0.5 and skill-worthy, tell the user why you are unsure before writing anything. If the source shows a different product version from the one the user runs, say so in `prerequisites`, lower the confidence, and do not reject for that alone.
 
@@ -91,7 +91,7 @@ Show the user the SKILL.md it prints (or the learning note). Ask for a yes unles
 python3 scripts/forge.py <work_dir>/distilled.json
 ```
 
-Skills land in `~/.claude/skills/<slug>/` and are live in the next session. Notes land in `~/.skillforge/notes/`. The catalog is `~/.skillforge/catalog.json`.
+Skills land in `~/.claude/skills/<slug>/` and are live in the next session. Notes land in `~/.skillforge/notes/<slug>.md`: one file per topic, one dated section per source, so name a note's `slug` for the topic, not the video. The catalog is `~/.skillforge/catalog.json`.
 
 Finish with two or three sentences: verdict, where it went, and one thing worth trying this week. Do not recap the steps.
 
