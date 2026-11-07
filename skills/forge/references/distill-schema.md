@@ -58,7 +58,8 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
   Use it instead of writing source names into `timestamp`.
 - `pitfalls[]` may be a string or `{"text", "timestamp", "source" | "refs"}`; `decision_points[]` may carry `timestamp`, `source` or
   `refs` too. In a merged skill forge.py attributes them like steps (a trailing `(1:30)` in a string pitfall becomes its timestamp)
-  and renders `(S2 1:20)`. Name the symptom the user will see in each pitfall.
+  and renders `(S2 1:20)`. Write each pitfall as `symptom → cause → fix`; the dry-run lints pitfalls without `→`, steps over 45
+  words or with timestamps in their text, more than 12 steps, SKILL.md over 900 words, and missing verification.
 - `useless_frames` (optional): indexes (the `NNN` in `NNN_H-MM-SS.jpg`) of frames that carry nothing: blank, loading screens,
   talking head only, intro/outro cards, near-duplicates. forge.py copies every other frame of this source into
   `references/frames/<source id>/` and links them from that source's notes. Recorded per source; it never changes the skill's content. Notes do not copy frames, so it has no effect on a note.

@@ -692,3 +692,21 @@ def test_frames_download_no_more_video_than_needed():
     assert ingest.video_format(768).startswith("bv*[height<=480][fps<=30]")
     assert ingest.video_format(1280).startswith("bv*[height<=720][fps<=30]")
     assert ingest.video_format(768).endswith("/b")
+
+
+def test_dry_run_lints_loose_skills(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    d = distilled()
+    d["procedure"][0]["detail"] = "Open Studio (ERP 0:43) " + "and then do many more things " * 10
+    d["pitfalls"] = ["Watch out for the trigger", "Rule fires on unrelated edits → no trigger field set → set Trigger Fields"]
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(d))
+    out = run_forge([str(f), "--dry-run"], env).stdout
+    assert "# lint: step 1 is" in out and "step 1 has a timestamp in its text" in out
+    assert "'Watch out for the trigger'" in out and "Rule fires on unrelated" not in out.split("# lint")[-1].split("\n")[0]
+    assert out.count("# lint: pitfall") == 1
+    tight = distilled()
+    tight["pitfalls"] = ["Nothing happens on save → rule inactive → toggle Active"]
+    tight["verification"] = ["The field shows the new value after saving"]
+    f.write_text(json.dumps(tight))
+    assert "# lint" not in run_forge([str(f), "--dry-run"], env).stdout

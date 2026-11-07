@@ -307,6 +307,33 @@ def validate(d: dict) -> None:
             die("useless_frames must be a list of frame indexes (integers)")
 
 
+STAMP_IN_TEXT = re.compile(r"\(\s*(?:[A-Z][\w-]*\s+)?\d{1,2}:\d{2}(?::\d{2})?")
+
+
+def lint(d: dict, skill_md: str) -> list[str]:
+    """Tightness checks shown in the dry-run. They warn; they never block a write."""
+    out = []
+    words = len(skill_md.split())
+    if words > 900:
+        out.append(f"SKILL.md is {words} words; aim for under 900 (move demo values and per-source detail into key_claims)")
+    steps = d.get("procedure") or []
+    if len(steps) > 12:
+        out.append(f"{len(steps)} steps; more than 12 usually means sub-steps or alternatives belong in decision_points")
+    for i, st in enumerate(steps, 1):
+        n = len((st.get("step", "") + " " + st.get("detail", "")).split())
+        if n > 45:
+            out.append(f"step {i} is {n} words; keep step + detail under 45")
+        if STAMP_IN_TEXT.search(st.get("step", "") + " " + st.get("detail", "")):
+            out.append(f"step {i} has a timestamp in its text; use timestamp/refs, which render as citations")
+    for p in d.get("pitfalls") or []:
+        text = item_text(p)
+        if "→" not in text and "->" not in text:
+            out.append(f"pitfall does not lead with the symptom ('symptom → cause → fix'): {text[:60]!r}")
+    if d.get("procedure") and not d.get("verification"):
+        out.append("no verification: add at least one check the user can see (a field value, a chatter line, a count)")
+    return out
+
+
 def dropped_steps(existing: dict | None, procedure: list[dict], incoming_ids: set) -> list[str]:
     """Stored steps that cite a source other than the incoming ones and are missing from the new procedure.
     That is what re-forging an old single-source distilled.json over a merged skill looks like."""
@@ -415,6 +442,8 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
               f"{kept} frames to references, {omitted} marked useless)")
         if uncited:
             print(f"# warning: {len(uncited)} step(s) cite no source in a multi-source skill: {uncited[:3]}")
+        for w in lint(merged, skill_md):
+            print(f"# lint: {w}")
         print()
         print(skill_md)
         return
