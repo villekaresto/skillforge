@@ -17,11 +17,15 @@ Scripts live next to this file in `scripts/`. Run them with the Python 3.10+ int
 python3 scripts/ingest.py "<url or file>"
 ```
 
-This fetches metadata and native captions (no download needed for most YouTube videos). It prints a JSON summary with `work_dir` and `transcript_md`. Read `transcript.md`.
+This fetches metadata and native captions (no download needed for most YouTube videos). It prints a JSON summary with `work_dir`, `transcript_md` and an `errors` list. Read `transcript.md`.
+
+Long transcripts (podcasts, talks over an hour) can run to hundreds of KB. Never judge from a sample. Read the file in parts with your file tool's offset/limit, keeping running notes of claims and procedure per part, then judge from the notes. For a 2-hour episode this is 4 to 6 reads; that is the job.
+
+If `errors` is non-empty, say what failed in one line and continue with whatever evidence arrived (frames survive a transcription failure). Do not retry the same engine; offer the other one.
 
 Choose extra evidence when the transcript is not enough:
 
-- `--frames` (default 40 keyframes) when the content is visual: screen recordings, demos, slides, physical tasks, Instagram clips. View the frames in `work_dir/frames/` with your image reading tool; filenames are timestamps.
+- `--frames` (default 40 keyframes) when the content is visual: screen recordings, demos, slides, physical tasks, Instagram clips. Frames combine scene changes with a uniform pass so slow screen recordings are still covered. View them in `work_dir/frames/` with your image reading tool; filenames are `NNN_H-MM-SS.jpg`. For code or terminal content use `--resolution 1280` and view every frame around the timestamps where the transcript says something is typed.
 - No captions (most podcasts and Instagram): `auto` transcribes locally with faster-whisper when `uv` is installed (audio stays on the machine), otherwise with Gemini when `GEMINI_API_KEY` is set. Force one with `--engine local` or `--engine gemini`. First local run downloads a model (~480 MB for `small`).
 - `--engine gemini` also makes Gemini WATCH the whole video and write a timestamped observation log to `work_dir/gemini.md`. Use it for demos and screen recordings when frames alone are not enough. Treat it as a colleague's notes, not ground truth.
 - Neither available? Say so in one line and offer the two options: `brew install uv` for private local transcription, or a free key from https://aistudio.google.com/apikey saved in `~/.skillforge/.env` as `GEMINI_API_KEY=...`. Never print a key or put one in a command.

@@ -227,15 +227,14 @@ def thumb(ffmpeg: str, img: Path) -> bytes:
     return r.stdout
 
 
-def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 6.0) -> list[tuple[Path, float]]:
+def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 3.0) -> list[tuple[Path, float]]:
+    """Return the frames that differ from the previously kept one; does not delete anything."""
     kept: list[tuple[Path, float]] = []
     last: bytes | None = None
     for f, t in pairs:
         cur = thumb(ffmpeg, f)
         if last is not None and len(cur) == len(last) == 256:
-            diff = sum(abs(a - b) for a, b in zip(cur, last)) / 256
-            if diff < threshold:
-                f.unlink()
+            if sum(abs(a - b) for a, b in zip(cur, last)) / 256 < threshold:
                 continue
         kept.append((f, t))
         last = cur
@@ -243,27 +242,29 @@ def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 6.0) 
 
 
 def extract_frames(video: Path, out: Path, max_frames: int, duration: float | None, width: int, no_dedup: bool) -> list[dict]:
+    """Scene changes (threshold 0.2) plus a uniform pass, merged by time, near-duplicates removed, thinned to the cap.
+    The uniform pass guarantees coverage of slow screen recordings where typing never trips the scene detector."""
     ffmpeg = need("ffmpeg")
     frames_dir = out / "frames"
     frames_dir.mkdir(exist_ok=True)
     scale = f"scale='min({width},iw)':-2"
-    r = run([ffmpeg, "-hide_banner", "-i", video, "-vf", f"select='gt(scene,0.3)',{scale},showinfo", *vfr_flag(ffmpeg),
+    r = run([ffmpeg, "-hide_banner", "-i", video, "-vf", f"select='gt(scene,0.2)',{scale},showinfo", *vfr_flag(ffmpeg),
              "-frames:v", max_frames * 3, "-q:v", 3, frames_dir / "scene_%04d.jpg"], timeout=1800)
     stamps = [float(m) for m in re.findall(r"pts_time:([0-9.]+)", r.stderr)]
-    files = sorted(frames_dir.glob("scene_*.jpg"))
-    pairs = list(zip(files, stamps))
-    if len(pairs) < max(4, max_frames // 5) and duration:
-        for f in files:
-            f.unlink()
-        step = max(duration / max_frames, 1.0)
+    pairs = list(zip(sorted(frames_dir.glob("scene_*.jpg")), stamps))
+    if duration:
+        step = max(duration / max(max_frames, 1), 2.0)
         run([ffmpeg, "-hide_banner", "-i", video, "-vf", f"fps=1/{step:.3f},{scale}", "-q:v", 3, frames_dir / "uniform_%04d.jpg"], timeout=1800)
-        files = sorted(frames_dir.glob("uniform_*.jpg"))
-        pairs = [(f, i * step) for i, f in enumerate(files)]
-    if not no_dedup:
-        before = len(pairs)
-        pairs = dedup(ffmpeg, pairs)
-        if before != len(pairs):
-            log(f"frames: dropped {before - len(pairs)} near-duplicates")
+        pairs += [(f, i * step) for i, f in enumerate(sorted(frames_dir.glob("uniform_*.jpg")))]
+    pairs.sort(key=lambda p: p[1])
+    if not no_dedup and pairs:
+        kept = dedup(ffmpeg, pairs)
+        if len(kept) >= max(3, min(max_frames, len(pairs)) // 4):
+            if len(kept) != len(pairs):
+                log(f"frames: dropped {len(pairs) - len(kept)} near-duplicates")
+            pairs = kept
+        else:
+            log("frames: dedup would leave too few frames (static content); keeping all")
     if len(pairs) > max_frames:
         keep = {round(i * (len(pairs) - 1) / (max_frames - 1)) for i in range(max_frames)}
         for i, (f, _) in enumerate(pairs):
@@ -271,10 +272,12 @@ def extract_frames(video: Path, out: Path, max_frames: int, duration: float | No
                 f.unlink()
         pairs = [p for i, p in enumerate(pairs) if i in keep]
     result = []
-    for f, t in pairs:
-        new = frames_dir / f"{hms(t).replace(':', '-')}.jpg"
+    for i, (f, t) in enumerate(pairs, 1):
+        new = frames_dir / f"{i:03d}_{hms(t).replace(':', '-')}.jpg"
         f.rename(new)
-        result.append({"time": t, "stamp": hms(t), "path": str(new)})
+        result.append({"index": i, "time": round(t, 2), "stamp": hms(t), "path": str(new)})
+    for leftover in list(frames_dir.glob("scene_*.jpg")) + list(frames_dir.glob("uniform_*.jpg")):
+        leftover.unlink()
     return result
 
 
@@ -286,14 +289,14 @@ def local_available() -> bool:
 
 def transcribe_local(audio: Path, language: str | None) -> list[dict]:
     helper = Path(__file__).with_name("whisper_local.py")
-    cmd = [need("uv"), "run", "--quiet", "--with", "faster-whisper", "--python", "3.12", str(helper), str(audio),
+    cmd = [need("uv"), "run", "--quiet", "--with", "faster-whisper>=1.1", "--with", "av<15", "--python", "3.12", str(helper), str(audio),
            "--model", WHISPER_MODEL]
     if language:
         cmd += ["--language", language]
     log(f"local transcription with faster-whisper {WHISPER_MODEL} (first run downloads the model)")
     r = run(cmd, timeout=int(setting("SKILLFORGE_WHISPER_TIMEOUT") or 3600))
     if r.returncode:
-        die(f"local transcription failed:\n{r.stderr[-1200:]}")
+        raise RuntimeError(f"local transcription failed:\n{r.stderr[-1200:]}")
     return json.loads(r.stdout)
 
 
@@ -447,14 +450,36 @@ def main() -> None:
     if watch and not key:
         die("--engine gemini needs GEMINI_API_KEY (env or ~/.skillforge/.env). Free key: https://aistudio.google.com/apikey")
 
+    errors: list[str] = []
+    frames: list[dict] = []
     if transcribe or watch or args.frames:
         if media is None:
             media = download_media(src, out, not (watch or args.frames), auth)
         is_video = media.suffix.lower() in VIDEO_EXT
-        audio = lambda: extract_audio(media, out) if is_video else media  # noqa: E731
+
+        if args.frames:                                    # frames first: they must survive a transcription failure
+            if is_video:
+                frames = extract_frames(media, out, args.frames, meta.get("duration"), args.resolution, args.no_dedup)
+            else:
+                log("--frames ignored: source is audio only")
+
+        audio_path = None
+        def audio() -> Path:
+            nonlocal audio_path
+            if audio_path is None:
+                audio_path = extract_audio(media, out) if is_video else media
+            return audio_path
 
         if transcribe == "local":
-            segs, provenance = transcribe_local(audio(), meta.get("language") or (args.lang if args.lang != "en" else None)), "local-whisper"
+            try:
+                segs = transcribe_local(audio(), meta.get("language") or (args.lang if args.lang != "en" else None))
+                provenance = "local-whisper"
+            except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+                errors.append(f"local transcription: {str(exc).splitlines()[-1][:300]}")
+                log(errors[-1])
+                if key:
+                    log("falling back to Gemini transcription because a key is available")
+                    transcribe = "gemini"
 
         if transcribe == "gemini" or (watch and is_video):
             upload = media if (watch and is_video) else audio()
@@ -470,25 +495,18 @@ def main() -> None:
             finally:
                 gemini_delete(name, key)
 
-    frames: list[dict] = []
-    if args.frames:
-        if media and media.suffix.lower() in VIDEO_EXT:
-            frames = extract_frames(media, out, args.frames, meta.get("duration"), args.resolution, args.no_dedup)
-        else:
-            log("--frames ignored: source is audio only")
-
     if media and not local and not args.keep_media:
         media.unlink(missing_ok=True)
         (out / "audio.m4a").unlink(missing_ok=True)
 
     (out / "source.json").write_text(json.dumps({"meta": meta, "transcript": segs, "transcript_provenance": provenance, "frames": frames,
-                                                 "gemini_notes_file": str(out / "gemini.md") if gemini_notes else None},
+                                                 "gemini_notes_file": str(out / "gemini.md") if gemini_notes else None, "errors": errors},
                                                 indent=2, ensure_ascii=False), encoding="utf-8")
     md = write_transcript_md(meta, segs, provenance, out)
     print(json.dumps({"work_dir": str(out), "transcript_md": str(md), "title": meta.get("title"), "uploader": meta.get("uploader"),
                       "duration": hms(meta["duration"]) if meta.get("duration") else None, "segments": len(segs),
                       "transcript_provenance": provenance, "frames": len(frames), "gemini_notes": bool(gemini_notes),
-                      "slug_hint": meta["slug_hint"]}, indent=2))
+                      "errors": errors, "slug_hint": meta["slug_hint"]}, indent=2))
 
 
 if __name__ == "__main__":
