@@ -686,3 +686,9 @@ def test_mlx_helper_drops_non_speech_and_loops():
     assert not whisper_mlx.keep({"no_speech_prob": 0.9, "avg_logprob": -1.4, "compression_ratio": 1.2})
     assert not whisper_mlx.keep({"no_speech_prob": 0.0, "avg_logprob": -0.2, "compression_ratio": 3.1})
     assert whisper_mlx.MODELS["small"] == "mlx-community/whisper-small-mlx"
+
+
+def test_frames_download_no_more_video_than_needed():
+    assert ingest.video_format(768).startswith("bv*[height<=480][fps<=30]")
+    assert ingest.video_format(1280).startswith("bv*[height<=720][fps<=30]")
+    assert ingest.video_format(768).endswith("/b")

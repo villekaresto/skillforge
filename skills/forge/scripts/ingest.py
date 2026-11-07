@@ -300,9 +300,16 @@ def local_metadata(path: Path) -> dict:
 
 # --------------------------------------------------------------------------- media
 
-def download_media(url: str, out: Path, audio_only: bool, auth: list[str]) -> Path:
+def video_format(frame_width: int) -> str:
+    """Download no more video than the frames need: frames are scaled to `frame_width`, and 60 fps adds nothing.
+    A 5-hour 720p60 stream was 3+ GB for 40 frames at 768 px."""
+    h = 480 if frame_width <= 854 else 720
+    return f"bv*[height<={h}][fps<=30]+ba/bv*[height<={h}]+ba/b[height<={h}]/b"
+
+
+def download_media(url: str, out: Path, audio_only: bool, auth: list[str], frame_width: int = 768) -> Path:
     fmt = ["-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a"] if audio_only else \
-          ["-f", "bv*[height<=720]+ba/b[height<=720]/b", "--merge-output-format", "mp4"]
+          ["-f", video_format(frame_width), "--merge-output-format", "mp4"]
     r = ytdlp_with_retry([*ytdlp_base(auth), *fmt, "-o", str(out / "media.%(ext)s"), url], "download")
     files = [p for p in out.glob("media.*") if p.suffix.lower() in AUDIO_EXT | VIDEO_EXT and not p.name.endswith(".part")]
     if r.returncode or not files:
@@ -664,7 +671,7 @@ def main() -> None:
     frames: list[dict] = []
     if transcribe or watch or args.frames:
         if media is None:
-            media = download_media(src, out, not (watch or args.frames), auth)
+            media = download_media(src, out, not (watch or args.frames), auth, args.resolution if not watch else 1280)
         is_video = media.suffix.lower() in VIDEO_EXT
 
         if args.frames:                                    # frames first: they must survive a transcription failure
