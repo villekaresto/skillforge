@@ -251,6 +251,8 @@ def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dic
     fresh = cache.is_file() and time.time() - cache.stat().st_mtime < INFO_CACHE_TTL
     # A fresh cached info.json skips YouTube's player request (the call that trips bot checks); captions still download.
     base = ytdlp_base(auth) + tail_args + (["--load-info-json", str(cache)] if fresh else [url])
+    if fresh:
+        log(f"using cached metadata {cache.name}")
     subs, provenance, errors, r = caption_passes(base, out)
     if not list(out.glob("media*.info.json")) and fresh:
         log("cached metadata was rejected; fetching it again")
