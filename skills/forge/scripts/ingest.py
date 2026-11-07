@@ -295,7 +295,9 @@ def fetch_captions(url: str, out: Path, lang: str, auth: list[str]) -> tuple[dic
         cache.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(info_files[0], cache)
     meta = {
-        "url": info.get("webpage_url") or url, "id": info.get("id"), "title": info.get("title"),
+        # A bare media link resolves to a mirror host that can change; keep the URL the user gave.
+        "url": url if info.get("extractor_key") == "Generic" else (info.get("webpage_url") or url),
+        "id": info.get("id"), "title": info.get("title"),
         "uploader": info.get("uploader") or info.get("channel"), "duration": info.get("duration"),
         "upload_date": info.get("upload_date"), "extractor": info.get("extractor_key"),
         "description": (info.get("description") or "")[:4000],
@@ -393,8 +395,8 @@ def is_blank(ffmpeg: str, img: Path) -> bool:
 
 
 def thin_by_time(pairs: list[tuple[Path, float]], max_frames: int, duration: float | None) -> list[tuple[Path, float]]:
-    """Pick at most `max_frames`, one per equal time bucket first, so a burst of cuts (memes, slides) cannot crowd out
-    a long static stretch; leftover slots go to the remaining frames, evenly by index."""
+    """Pick at most `max_frames`, one per equal time bucket first, so a burst of cuts (memes, slides, a "starting soon"
+    loop) cannot crowd out a long static stretch; leftover slots go to whichever frame splits the largest time gap."""
     if len(pairs) <= max_frames:
         return pairs
     span = duration or (pairs[-1][1] + 1)
@@ -402,10 +404,20 @@ def thin_by_time(pairs: list[tuple[Path, float]], max_frames: int, duration: flo
     for i, (_, t) in enumerate(pairs):
         chosen.setdefault(min(int(t / span * max_frames), max_frames - 1), i)
     keep = set(chosen.values())
-    rest = [i for i in range(len(pairs)) if i not in keep]
-    need = max_frames - len(keep)
-    if need > 0 and rest:
-        keep |= {rest[round(j * (len(rest) - 1) / max(need - 1, 1))] for j in range(min(need, len(rest)))}
+    while len(keep) < max_frames:
+        times = sorted(pairs[i][1] for i in keep)
+        best, best_gap = None, -1.0
+        for i, (_, t) in enumerate(pairs):
+            if i in keep:
+                continue
+            lo = max((x for x in times if x <= t), default=0.0)
+            hi = min((x for x in times if x >= t), default=span)
+            gap = min(t - lo, hi - t)          # how far this frame is from its nearest chosen neighbour
+            if gap > best_gap:
+                best, best_gap = i, gap
+        if best is None:
+            break
+        keep.add(best)
     return [p for i, p in enumerate(pairs) if i in keep]
 
 
@@ -768,6 +780,8 @@ def main() -> None:
             finally:
                 gemini_delete(name, key)
 
+    if media and not meta.get("duration"):                 # bare media links carry no duration in their metadata
+        meta["duration"] = local_metadata(media).get("duration")
     if media and not local and not args.keep_media:
         media.unlink(missing_ok=True)
         (out / "audio.m4a").unlink(missing_ok=True)

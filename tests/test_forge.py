@@ -843,3 +843,18 @@ def test_section_parsing_and_frame_offsets(tmp_path):
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x240:d=10:r=25", str(video)], check=True)
     frames = ingest.extract_frames(video, tmp_path, max_frames=4, duration=10.0, width=320, no_dedup=True, offset=4620.0)
     assert frames and all(f["time"] >= 4620 for f in frames) and frames[0]["stamp"].startswith("1:17:")
+
+
+def test_thinning_fills_the_largest_gaps_not_the_intro_burst():
+    intro = [(Path(f"i{i}.jpg"), float(i)) for i in range(10)]                  # a 10 s burst of "starting soon" cuts
+    work = [(Path(f"w{t}.jpg"), float(t)) for t in (100, 150, 200, 250, 300, 350, 400, 450, 500)]
+    kept = ingest.thin_by_time(intro + work, max_frames=6, duration=1000)
+    times = sorted(t for _, t in kept)
+    assert len(kept) == 6 and sum(1 for t in times if t < 10) == 1, f"spare slots went to the intro burst: {times}"
+    assert 100.0 in times, "the frame splitting the largest gap is taken first"
+
+
+def test_bare_media_url_keeps_the_given_url():
+    src = INGEST.read_text()
+    assert 'url if info.get("extractor_key") == "Generic"' in src
+    assert 'meta["duration"] = local_metadata(media).get("duration")' in src
