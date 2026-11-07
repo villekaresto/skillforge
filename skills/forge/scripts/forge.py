@@ -176,15 +176,21 @@ def forge(d: dict, dry_run: bool) -> None:
 
     # Sources accumulate; everything else is the latest distilled (Claude merges content before calling us).
     sources = (existing or {}).get("sources", [])
-    if not any(s["url"] == src["url"] for s in sources):
+    new_source = not any(s["url"] == src["url"] for s in sources)
+    if new_source:
         sources.append(src)
-    merged = {**d, "sources": sources, "forged_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-              "version": ((existing or {}).get("version", 0) + 1)}
-    merged.pop("source", None)
+    # Re-forging the same source with the same content re-renders the files but is not a new version.
+    content = {k: v for k, v in d.items() if k != "source"}
+    old_content = {k: v for k, v in (existing or {}).items() if k not in ("sources", "forged_at", "version")}
+    changed = existing is None or new_source or content != old_content
+    merged = {**content, "sources": sources,
+              "forged_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds") if changed else existing.get("forged_at"),
+              "version": (existing or {}).get("version", 0) + (1 if changed else 0)}
+    action = "create" if not existing else "update" if changed else "unchanged"
 
     skill_md = render_skill_md(merged)
     if dry_run:
-        print(f"# would {'update' if existing else 'create'} {skill_dir}  (version {merged['version']})\n")
+        print(f"# would {action} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)})\n")
         print(skill_md)
         return
 
@@ -200,7 +206,7 @@ def forge(d: dict, dry_run: bool) -> None:
     cat["skills"][slug] = {"name": merged["name"], "path": str(skill_dir), "version": merged["version"], "updated": today(),
                            "sources": [s["url"] for s in sources], "confidence": src["confidence"]}
     save_catalog(cat)
-    print(json.dumps({"written": "update" if existing else "create", "skill": slug, "path": str(skill_dir),
+    print(json.dumps({"written": action, "skill": slug, "path": str(skill_dir),
                       "version": merged["version"], "sources": len(sources)}, indent=2))
 
 

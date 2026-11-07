@@ -183,3 +183,23 @@ def test_frontmatter_description_is_quoted_yaml(tmp_path, monkeypatch):
         return
     front = r.stdout.split("---")[1]
     assert yaml.safe_load(front)["description"] == d["description"]
+
+
+def test_same_source_twice_is_idempotent(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(distilled()))
+    assert run_forge([str(f)], env).returncode == 0
+    r = run_forge([str(f)], env)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["written"] == "unchanged"
+    stored = json.loads((tmp_path / "skills" / "demo-task" / ".forge" / "skill.json").read_text())
+    assert stored["version"] == 1 and len(stored["sources"]) == 1
+
+    d = distilled()
+    d["pitfalls"].append("A second pitfall found on re-study")
+    f.write_text(json.dumps(d))
+    r = run_forge([str(f)], env)
+    assert json.loads(r.stdout)["written"] == "update"
+    stored = json.loads((tmp_path / "skills" / "demo-task" / ".forge" / "skill.json").read_text())
+    assert stored["version"] == 2 and len(stored["sources"]) == 1
