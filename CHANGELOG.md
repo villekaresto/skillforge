@@ -9,6 +9,9 @@ Generated from the git history. Dates are 2026-11-07 unless noted; all work happ
 - **Multi-source skills in one go.** `forge.py` accepts `"sources": [...]` with per-source `work_dir`, `useless_frames` and `confidence`, plus several distilled files in one call. A combined dry-run simulates earlier files, so a second note on a topic shows as an append.
 - **Apple Silicon transcription.** `whisper_mlx.py` runs mlx-whisper (about 70× real time, 7× faster than faster-whisper on the same 10-minute video) and falls back to faster-whisper automatically. `SKILLFORGE_WHISPER_BACKEND` forces one or the other.
 - **Tighter skills.** SKILL.md's "Write it tight" rules: imperative steps under 45 words, at most 12 steps, alternatives as decision points, `symptom → cause → fix` pitfalls, checkable verification, about 900 words. `forge.py --dry-run` prints `# lint:` warnings for each.
+- **`--section START-END`**: frames from one chapter of a long video. The video is downloaded at the capped quality and cut locally, frame-accurately, so the frames line up with the full transcript.
+- **`forge.py --adopt-note FILE... --topic SLUG`** moves pre-0.1.3 per-video notes into topic notes.
+- Distill rules from a skeptical review of the best skills: one method per path, placeholders instead of demo data, every step an action, optional actions labelled, product version in the trigger. The new lint also flags presenter demo values.
 - `docs/architecture.md`, a README rewritten as a five-minute quickstart, and this changelog.
 
 **Fixed**
@@ -18,6 +21,10 @@ Generated from the git history. Dates are 2026-11-07 unless noted; all work happ
 - Captions that are mostly `[Music]` are flagged.
 - Frames-only downloads are capped at 480p/30 fps (720p for `--resolution` above 854). A 5-hour stream was 3+ GB.
 - A login hint is shown for any site that needs an account (Vimeo).
+- Spare frame slots fill the largest time gaps; a "starting soon" loop no longer eats the frame budget.
+- Bare media links keep the URL you gave (not the redirect mirror) and get their duration from ffprobe.
+- Rewriting a skill without its original evidence keeps the frames already in `references/`.
+- yt-dlp timeouts end with a message instead of a traceback.
 - `--list` shows `note_topics`.
 
 ## 0.1.3
