@@ -46,7 +46,7 @@ Pick a short tutorial that shows a procedure end to end (a software setting, a d
 
 ## What it decides, and why
 
-Most videos should not become skills. A skill is loaded whenever it triggers, so a vague one costs you more than a missing one. A source becomes a skill only when it has a concrete procedure of at least 3 steps that you would repeat, it adds something Claude doesn't already know (version-specific paths, real pitfalls, numbers, checks), and the evidence actually shows the key step. Everything else becomes a note in `~/.skillforge/notes/<topic>.md`, with one dated section per source.
+Most videos should not become skills. A skill is loaded whenever it triggers, so a vague one costs you more than a missing one. A source becomes a skill only when it has a concrete procedure of at least 3 steps that you would repeat, it adds something Claude doesn't already know (version-specific paths, real pitfalls, numbers, checks), and the evidence actually shows the key step. Sources that teach principles rather than a procedure (communication, sales, decision-making, habits, finance) can become a **lens**: a skill that tells Claude when to apply a way of thinking, with 5–15 rules of thumb, the mistakes the speakers warn about and worked examples, merged by topic. Everything else becomes a note in `~/.skillforge/notes/<topic>.md`, with one dated section per source.
 
 How the pieces fit is described in [docs/architecture.md](docs/architecture.md).
 
@@ -74,7 +74,7 @@ Results, every fix, and the remaining weaknesses are in [docs/qa/FINDINGS.md](do
 
 | | |
 |---|---|
-| Skills | `~/.claude/skills/<slug>/`: `SKILL.md`, `references/` (per-source notes, useful frames, `commands.md`), `.forge/skill.json` |
+| Skills and lenses | `~/.claude/skills/<slug>/`: `SKILL.md`, `references/` (per-source notes, useful frames, `commands.md`), `.forge/skill.json` |
 | Learning notes | `~/.skillforge/notes/<topic>.md`, one dated section per source |
 | Catalog | `~/.skillforge/catalog.json` (`forge.py --list`) |
 | Evidence | `~/.skillforge/work/` (safe to delete); caption metadata cache in `~/.skillforge/cache/` |

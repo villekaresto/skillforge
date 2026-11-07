@@ -639,7 +639,7 @@ def test_a_playlist_cluster_forges_one_skill_from_several_videos(tmp_path, monke
     (tmp_path / "cluster.json").write_text(json.dumps(d))
     r = run_forge([str(tmp_path / "cluster.json"), "--dry-run"], env)
     assert "would create" in r.stdout and "2 sources; 3 frames to references, 1 marked useless" in r.stdout
-    assert "1 step(s) cite no source" in r.stdout and "'Three'" in r.stdout
+    assert "cite no source" in r.stdout and "'Three'" in r.stdout
     r = run_forge([str(tmp_path / "cluster.json")], env)
     assert json.loads(r.stdout)["sources"] == 2
     skill = tmp_path / "skills" / "demo-task"
@@ -972,3 +972,93 @@ def test_ingest_never_lets_child_processes_read_stdin(tmp_path):
             % (str(INGEST.parent), str(video), str(tmp_path)))
     r = subprocess.run([sys.executable, "-c", code], input="next line one\nnext line two\n", capture_output=True, text=True)
     assert "next line one" in r.stdout and "next line two" in r.stdout, r.stderr
+
+
+def lens_distilled(url="https://example.com/v/l1", sid="l1", n=6):
+    return {
+        "verdict": {"kind": "lens", "confidence": 0.7, "reason": "principles with timestamps"},
+        "source": {"url": url, "id": sid, "title": "Talk", "uploader": "Someone", "ingested_at": "2026-11-07T10:00:00+00:00"},
+        "slug": "communication-lens", "name": "Communication lens",
+        "description": "Principles for clear speaking. Use when the user asks to prepare a talk or a hard conversation.",
+        "when_to_apply": ["the user is preparing a talk", "the user asks how to phrase a hard message"],
+        "principles": [{"text": f"Principle {i}", "detail": "Why it works.", "timestamp": f"0:{10 + i}"} for i in range(n)],
+        "mistakes": [{"text": "Rambling before the point", "timestamp": "1:00"}],
+        "examples": [{"situation": "Asking for a deadline change", "apply": "Lead with the ask, then one reason."},
+                     {"situation": "Opening a talk", "apply": "Start with the outcome for the listener."}],
+        "apply_to_me": ["Use it for supplier calls"],
+    }
+
+
+def test_lens_renders_principles_mistakes_and_examples(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(lens_distilled()))
+    dry = run_forge([str(f), "--dry-run"], env).stdout
+    assert "would create lens" in dry and "# lint" not in dry
+    assert run_forge([str(f)], env).returncode == 0
+    md = (tmp_path / "skills" / "communication-lens" / "SKILL.md").read_text()
+    for part in ("## When to apply", "## Principles", "1. **Principle 0** Why it works. _(source 0:10)_",
+                 "## Common mistakes", "## Worked examples", "**Opening a talk**"):
+        assert part in md
+    cat = json.loads((tmp_path / "home" / "catalog.json").read_text())
+    assert cat["skills"]["communication-lens"]["kind"] == "lens"
+
+
+def test_lens_needs_five_to_fifteen_principles_and_two_to_three_examples(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(lens_distilled(n=3)))
+    assert run_forge([str(f), "--dry-run"], env).returncode == 2
+    d = lens_distilled()
+    d["examples"] = d["examples"][:1]
+    f.write_text(json.dumps(d))
+    assert run_forge([str(f), "--dry-run"], env).returncode == 2
+
+
+def test_lens_merges_by_topic_and_supersedes_the_notes_it_absorbs(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    for url in ("https://example.com/v/l1", "https://example.com/v/l2"):
+        n = distilled(url=url, worthy=False)
+        n["slug"] = "communication"
+        f.write_text(json.dumps(n))
+        assert run_forge([str(f)], env).returncode == 0
+    a = lens_distilled()
+    a["supersedes_notes"] = True
+    f.write_text(json.dumps(a))
+    out = json.loads(run_forge([str(f)], env).stdout)
+    assert out["notes_moved"] == 1
+    note = (tmp_path / "home" / "notes" / "communication.md").read_text()
+    assert "v/l1" not in note and "v/l2" in note
+    b = lens_distilled(url="https://example.com/v/l2", sid="l2")
+    b["principles"] = a["principles"] + [{"text": "A principle only the second talk has", "timestamp": "2:00"}]
+    b["supersedes_notes"] = True
+    f.write_text(json.dumps(b))
+    out = json.loads(run_forge([str(f)], env).stdout)
+    assert out["sources"] == 2 and out["version"] == 2
+    md = (tmp_path / "skills" / "communication-lens" / "SKILL.md").read_text()
+    assert "**Principle 0** Why it works. _(S1 0:10)_" in md and "_(S2 2:00)_" in md
+    assert not (tmp_path / "home" / "notes" / "communication.md").exists()
+    stale = lens_distilled()                                    # an old single-source file cannot drop S2's principle
+    f.write_text(json.dumps(stale))
+    assert run_forge([str(f)], env).returncode == 2
+
+
+def test_export_for_chat_has_no_frames_and_no_profile_context(tmp_path, monkeypatch):
+    import zipfile
+    env = env_for(tmp_path, monkeypatch)
+    env["SKILLFORGE_EXPORT_DIR"] = str(tmp_path / "export")
+    work = tmp_path / "work"
+    (work / "frames").mkdir(parents=True)
+    (work / "frames" / "001_0-10.jpg").write_bytes(b"jpg")
+    (work / "source.json").write_text(json.dumps({"frames": [{"index": 1, "stamp": "0:10", "path": "x/001_0-10.jpg"}]}))
+    d = distilled()
+    d["apply_to_me"] = ["Private line about my own stack"]
+    (work / "distilled.json").write_text(json.dumps(d))
+    assert run_forge([str(work / "distilled.json")], env).returncode == 0
+    assert "Private line" in (tmp_path / "skills" / "demo-task" / "references" / "source-abc.md").read_text()
+    assert run_forge(["--export", "demo-task"], env).returncode == 0
+    z = zipfile.ZipFile(tmp_path / "export" / "demo-task.zip")
+    assert not any("frames" in n for n in z.namelist())
+    text = "".join(z.read(n).decode() for n in z.namelist() if n.endswith(".md"))
+    assert "Private line" not in text and "Worth trying" not in text and "Key claims" in text

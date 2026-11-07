@@ -44,10 +44,30 @@ Claude writes this after studying the evidence. `forge.py` validates and renders
 }
 ```
 
+## Lens (principles, not a procedure)
+
+```json
+{
+  "verdict": {"kind": "lens", "confidence": 0.7, "reason": "Seven rules of thumb with examples; changes how Claude advises."},
+  "source": {"url": "https://www.youtube.com/watch?v=XXXX", "id": "XXXX", "title": "Video title", "ingested_at": "..."},
+  "slug": "negotiation-lens",
+  "name": "Negotiation lens",
+  "description": "Principles for preparing and running a negotiation. Use when the user asks to prepare a negotiation, answer a demand, or set a walk-away point.",
+  "when_to_apply": ["the user is preparing a price or terms negotiation", "the user asks how to answer a demand"],
+  "principles": [{"text": "Decide your walk-away point before the first call", "detail": "Write it down; it stops anchoring.", "timestamp": "3:10"}],
+  "mistakes": [{"text": "You concede early and get nothing back → no trade rule → trade every concession for one", "timestamp": "7:40"}],
+  "examples": [{"situation": "A customer asks for 10% off", "apply": "Ask what they can give in return (volume, payment terms) before answering."}],
+  "supersedes_notes": true
+}
+```
+
+5–15 principles and 2–3 examples are enforced. Principles, mistakes and examples take `timestamp`/`source`/`refs` like steps, and merge across sources the same way.
+
 ## Field rules
 
 - `verdict` and either `source` (one video) or `sources` (a playlist cluster: several videos, one skill) are required; every source needs a `url`.
-- When `skill_worthy` is true: `slug`, `name`, `description`, `procedure` (3+ steps) required.
+- `verdict.kind` is `skill`, `lens` or `note` (older files use `skill_worthy`). A skill needs `slug`, `name`, `description`, `procedure` (3+ steps); a lens needs `slug`, `name`, `description`, `when_to_apply`, `principles`, `mistakes`, `examples`.
+- `supersedes_notes: true` moves the sources out of the note topics they were filed under when they become a skill or lens.
 - When false: `summary`, `key_claims`, `apply_to_me` are what make the learning note useful. `slug` optional (used for the note filename).
 - Timestamps as `M:SS` or `H:MM:SS`, matching a transcript cue time (not a chapter time).
 - `procedure[].source` (optional): the `id` (or url) of the source a step comes from. Leave it out for a single-source skill.

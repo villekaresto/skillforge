@@ -2,6 +2,12 @@
 
 Generated from the git history. Dates are 2026-11-07 unless noted; all work happened in one day of QA-driven iteration.
 
+## 0.4.0
+
+- **Lens**, a third verdict between skill and note, for sources that teach principles rather than a procedure. A lens forges a skill folder whose SKILL.md says when to apply it and lists 5–15 timestamped principles, the mistakes the speakers warn about, and 2–3 worked examples. Lenses merge by topic with the same citation, drop-guard and attribution rules as skills, and `supersedes_notes` moves absorbed sources out of their note topics.
+- **Shareable export.** `--export` leaves out `references/frames/` and every `apply_to_me` section, so zips are small and keep profile context on the machine.
+- `forge.py --export`, a fix so ingest never reads stdin, and a refined duplicate-source guard (one skill plus one note per video per run).
+
 ## 0.3.0
 
 - **User profile.** `~/.skillforge/profile.md` (or `SKILLFORGE_PROFILE`) holds your role, tools with versions, core work, context and "not relevant" topics. `/forge` reads it first (`forge.py --profile`). The judge's "central to your work" test and `apply_to_me` use it, and an empty `apply_to_me` is flagged when a profile exists. Only `references/profile.example.md`, with placeholders, ships; `profile.md` is git-ignored.

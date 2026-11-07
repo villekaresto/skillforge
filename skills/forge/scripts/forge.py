@@ -107,7 +107,38 @@ def claim_line(c: dict) -> str:
     return f"- [{c['timestamp']}] {c['claim']}" if c.get("timestamp") else f"- {c['claim']}"
 
 
+def render_lens_md(d: dict) -> str:
+    """A lens: when to apply it, the principles as rules of thumb, the mistakes the speakers warn about, worked examples."""
+    desc = d["description"].replace("\n", " ").strip()
+    labels, multi = source_labels(d["sources"]), len(d["sources"]) > 1
+    out = ["---", f"name: {d['slug']}", f"description: {json.dumps(desc, ensure_ascii=False)}", "---", "", f"# {d['name']}", ""]
+    if d.get("summary"):
+        out += [d["summary"].strip(), ""]
+    out += ["## When to apply", *[f"- {w}" for w in d["when_to_apply"]], ""]
+    out.append("## Principles")
+    for i, pr in enumerate(d["principles"], 1):
+        line = f"{i}. **{pr['text']}**"
+        if pr.get("detail"):
+            line += f" {pr['detail']}"
+        out.append(line + cite(pr, labels, multi))
+    out += ["", "## Common mistakes"]
+    for m in d["mistakes"]:
+        m = as_pitfall(m)
+        out.append(f"- {m['text']}" + cite(m, labels, multi))
+    out += ["", "## Worked examples"]
+    for ex in d["examples"]:
+        out += [f"**{ex.get('situation', '').strip()}**", "", ex.get("apply", "").strip() + cite(ex, labels, multi), ""]
+    out += ["## Sources"]
+    for i, s in enumerate(d["sources"], 1):
+        out.append(f"- {f'S{i}: ' if multi else ''}[{s.get('title') or s['url']}]({s['url']}) by {s.get('uploader') or 'unknown'}, "
+                   f"ingested {s['ingested_at'][:10]} (confidence {s.get('confidence', '?')})")
+    out += ["", "Notes with timestamps for each source live in `references/`.", ""]
+    return "\n".join(out)
+
+
 def render_skill_md(d: dict) -> str:
+    if d.get("kind") == "lens":
+        return render_lens_md(d)
     name = d["name"]
     desc = d["description"].replace("\n", " ").strip()
     # JSON strings are valid YAML scalars: quoting keeps ': ', '#', quotes and leading '-' or '[' from breaking frontmatter.
@@ -214,6 +245,15 @@ def attribute_steps(procedure: list[dict], old: dict | None, new_src: dict) -> l
 def attribute_pitfalls(pitfalls: list, old: dict | None, new_src: dict) -> list[dict]:
     old_items = [as_pitfall(p) for p in (old or {}).get("pitfalls", [])]
     return attribute([as_pitfall(p) for p in pitfalls], old_items, lambda p: p["text"], old, new_src)
+
+
+def attribute_principles(items: list[dict], old: dict | None, new_src: dict) -> list[dict]:
+    return attribute(items, (old or {}).get("principles", []), lambda p: p["text"], old, new_src)
+
+
+def attribute_mistakes(items: list, old: dict | None, new_src: dict) -> list[dict]:
+    old_items = [as_pitfall(p) for p in (old or {}).get("mistakes", [])]
+    return attribute([as_pitfall(p) for p in items], old_items, lambda p: p["text"], old, new_src)
 
 
 def attribute_decisions(decisions: list[dict], old: dict | None, new_src: dict) -> list[dict]:
@@ -363,19 +403,39 @@ def upsert_note(text: str | None, slug: str, url: str, section: str) -> tuple[st
 
 # --------------------------------------------------------------------------- forging
 
+def verdict_kind(d: dict) -> str:
+    """skill (a procedure), lens (principles to apply), or note. Older files only say skill_worthy."""
+    v = d.get("verdict") or {}
+    if v.get("kind") in ("skill", "lens", "note"):
+        return v["kind"]
+    return "skill" if v.get("skill_worthy") else "note"
+
+
 def validate(d: dict) -> None:
     if "verdict" not in d or not ("source" in d or "sources" in d):
         die("distilled JSON needs 'verdict' and 'source' (or 'sources' for a playlist cluster)")
-    if "skill_worthy" not in d["verdict"] or "reason" not in d["verdict"]:
-        die("verdict needs skill_worthy (bool) and reason (str)")
-    if d["verdict"]["skill_worthy"]:
+    v = d["verdict"]
+    if "reason" not in v or ("kind" not in v and "skill_worthy" not in v):
+        die("verdict needs kind (skill|lens|note) or skill_worthy, and reason")
+    kind = verdict_kind(d)
+    if kind == "skill":
         for k in ("slug", "name", "description", "procedure"):
             if not d.get(k):
                 die(f"skill-worthy output needs {k!r}")
+    if kind == "lens":
+        for k in ("slug", "name", "description", "when_to_apply", "principles", "mistakes", "examples"):
+            if not d.get(k):
+                die(f"a lens needs {k!r}")
+        if not 5 <= len(d["principles"]) <= 15:
+            die(f"a lens has 5-15 principles, got {len(d['principles'])}; fewer means a note, more means split the topic")
+        if not 2 <= len(d["examples"]) <= 3:
+            die(f"a lens has 2-3 worked examples, got {len(d['examples'])}")
+        if not all(isinstance(x, dict) and x.get("text") for x in d["principles"]):
+            die("each principle is an object with 'text' (plus timestamp/source or refs)")
     incoming = d["sources"] if "sources" in d else [d["source"]]
     if not isinstance(incoming, list) or not incoming or not all(isinstance(s, dict) and s.get("url") for s in incoming):
         die("every source needs a url")
-    if "sources" in d and not d["verdict"]["skill_worthy"]:
+    if "sources" in d and kind == "note":
         die("a learning note covers one source: write one distilled.json per video, reusing the topic slug")
     for u in [d.get("useless_frames")] + [s.get("useless_frames") for s in incoming]:
         if u is not None and (not isinstance(u, list) or not all(isinstance(i, int) for i in u)):
@@ -411,6 +471,14 @@ def lint(d: dict, skill_md: str) -> list[str]:
     leaks += [f"verification {i}" for i, v in enumerate(d.get("verification") or [], 1) if demo.search(v)]
     if leaks:
         out.append(f"demo values in {', '.join(leaks[:5])}: use placeholders, put the presenter's values in key_claims")
+    for i, pr in enumerate(d.get("principles") or [], 1):
+        n = len((pr.get("text", "") + " " + pr.get("detail", "")).split())
+        if n > 40:
+            out.append(f"principle {i} is {n} words; a rule of thumb fits in under 40")
+        if STAMP_IN_TEXT.search(pr.get("text", "") + " " + pr.get("detail", "")):
+            out.append(f"principle {i} has a timestamp in its text; use timestamp/refs")
+    if d.get("kind") == "lens" and any(not (pr.get("timestamp") or pr.get("refs")) for pr in d.get("principles") or []):
+        out.append("every principle needs a timestamp (or refs) so it can be checked against the source")
     if d.get("procedure") and not d.get("verification"):
         out.append("no verification: add at least one check the user can see (a field value, a chatter line, a count)")
     return out
@@ -421,7 +489,8 @@ def unknown_citations(d: dict, sources: list[dict]) -> list[str]:
     a typo would otherwise silently lose its S-label."""
     known = {x for s in sources for x in (s.get("id"), s.get("url")) if x}
     items = [*(d.get("procedure") or []), *[p for p in d.get("pitfalls") or [] if isinstance(p, dict)],
-             *(d.get("decision_points") or []), *(d.get("key_claims") or [])]
+             *(d.get("decision_points") or []), *(d.get("key_claims") or []), *(d.get("principles") or []),
+             *[m for m in d.get("mistakes") or [] if isinstance(m, dict)], *(d.get("examples") or [])]
     cited = {r.get("source") for it in items for r in (it.get("refs") or [])} | {it.get("source") for it in items}
     return sorted(c for c in cited - {None} if c not in known)
 
@@ -434,21 +503,22 @@ def step_citations(st: dict) -> set:
     return {p for p in pairs if p[0]}
 
 
-def dropped_steps(existing: dict | None, procedure: list[dict], incoming_ids: set) -> list[str]:
+def dropped_steps(existing: dict | None, procedure: list[dict], incoming_ids: set, field: str = "procedure",
+                  key: str = "step") -> list[str]:
     """Stored steps backed by a source other than the incoming ones whose evidence is gone from the new procedure.
     A step counts as kept when its text survives OR any of its (source, timestamp) citations still appears, so a
     tightening rewrite that rewords steps passes while re-forging an old single-source distilled.json does not."""
     if not existing or len(existing.get("sources", [])) < 2:
         return []
-    kept_text = {st["step"] for st in procedure}
+    kept_text = {st[key] for st in procedure}
     kept_cites = set().union(*(step_citations(st) for st in procedure)) if procedure else set()
     lost = []
-    for st in existing.get("procedure", []):
+    for st in existing.get(field, []):
         cites = step_citations(st)
         others = {c for c in cites if c[0] not in incoming_ids}
-        if st["step"] in kept_text or not others or cites & kept_cites:
+        if st[key] in kept_text or not others or cites & kept_cites:
             continue
-        lost.append(st["step"])
+        lost.append(st[key])
     return lost
 
 
@@ -483,7 +553,8 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     incoming = incoming_sources(d, work_dir)
     cat = load_catalog()
 
-    if not d["verdict"]["skill_worthy"]:
+    kind = verdict_kind(d)
+    if kind == "note":
         src = public(incoming[0])
         slug = slugify(d.get("slug") or re.sub(r"[^a-z0-9]+", "-", (src.get("title") or "note").lower())[:50])
         # One file per topic slug; each source is a dated section, replaced when the same source is re-studied.
@@ -531,7 +602,8 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     if unknown:
         die(f"citations name sources this skill does not have: {unknown}. Use each source's id (or url) exactly.")
     # Re-forging the same source with the same content re-renders the files but is not a new version.
-    content = {k: v for k, v in d.items() if k not in ("source", "sources", "useless_frames")}   # frame verdicts belong to sources
+    content = {k: v for k, v in d.items() if k not in ("source", "sources", "useless_frames", "supersedes_notes")}
+    content["kind"] = kind
     # Version-mismatch pitfalls are generated from the sources and the profile on every forge, never hand-written.
     profile = load_profile()
     generated = version_pitfalls(sources, profile)
@@ -539,15 +611,18 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     if kept or generated:
         content["pitfalls"] = kept + generated
     ids = {x for s in incoming for x in (s.get("id"), s["url"]) if x}
-    lost = dropped_steps(existing, content.get("procedure", []), ids)
+    lost = dropped_steps(existing, content.get("procedure", []), ids) + \
+        dropped_steps(existing, content.get("principles", []), ids, field="principles", key="text")
     if lost and not allow_drop:
         die(f"this would drop {len(lost)} step(s) that other sources of '{slug}' back: {lost[:5]}. "
             f"Load the stored version with --show {slug} and merge into it, or pass --allow-drop if removing them is intended.")
     if len(sources) > 1 and existing and len(incoming) == 1:
-        for field, fn in (("procedure", attribute_steps), ("pitfalls", attribute_pitfalls), ("decision_points", attribute_decisions)):
+        for field, fn in (("procedure", attribute_steps), ("pitfalls", attribute_pitfalls), ("decision_points", attribute_decisions),
+                          ("principles", attribute_principles), ("mistakes", attribute_mistakes)):
             if content.get(field):
                 content[field] = fn(content[field], existing, incoming[0])
     old_content = {k: v for k, v in (existing or {}).items() if k not in ("sources", "forged_at", "version")}
+    old_content.setdefault("kind", "skill")        # skills forged before lenses existed
     changed = existing is None or new_source or content != old_content
     merged = {**content, "sources": sources,
               "forged_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds") if changed else existing.get("forged_at"),
@@ -556,14 +631,20 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
 
     skill_md = render_skill_md(merged)
     per_source = [(src, *source_frames(src["_work_dir"], set(src.get("useless_frames") or []))) for src in incoming]
-    uncited = [st["step"] for st in merged.get("procedure", []) if not st.get("source") and not st.get("refs")] if len(sources) > 1 else []
+    uncited = [st.get("step") or st.get("text") for st in [*merged.get("procedure", []), *merged.get("principles", [])]
+               if not st.get("source") and not st.get("refs")] if len(sources) > 1 else []
+    # A source promoted from a note to this skill or lens leaves its note topic, but only when the file says so:
+    # a long course can deliberately feed both a skill and a note.
+    promoted = [x for x in cat["notes"] if d.get("supersedes_notes") and any(x.get("url") == s["url"] for s in incoming)]
     if dry_run:
         verb = {"create": "would create", "update": "would update", "unchanged": "unchanged, would re-render"}[action]
         kept, omitted = sum(len(f) for _, f, _ in per_source), sum(o for _, _, o in per_source)
-        print(f"# {verb} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)}; "
+        print(f"# {verb} {kind} {skill_dir}  (version {merged['version']}, {len(sources)} source{'s' * (len(sources) != 1)}; "
               f"{kept} frames to references, {omitted} marked useless)")
         if uncited:
-            print(f"# warning: {len(uncited)} step(s) cite no source in a multi-source skill: {uncited[:3]}")
+            print(f"# warning: {len(uncited)} step(s)/principle(s) cite no source in a multi-source {kind}: {uncited[:3]}")
+        for x in promoted:
+            print(f"# would move {x['url']} out of note topic {Path(x['file']).stem}")
         for w in lint(merged, skill_md):
             print(f"# lint: {w}")
         for p in generated:
@@ -596,11 +677,25 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
         (skill_dir / "references" / "commands.md").write_text(render_commands(merged), encoding="utf-8")
     store.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    cat["skills"][slug] = {"name": merged["name"], "path": str(skill_dir), "version": merged["version"], "updated": today(),
+    for x in promoted:
+        remove_note_section(Path(x["file"]), x["url"])
+    cat["notes"] = [x for x in cat["notes"] if x not in promoted]
+    cat["skills"][slug] = {"name": merged["name"], "kind": kind, "path": str(skill_dir), "version": merged["version"], "updated": today(),
                            "sources": [s["url"] for s in sources], "confidence": d["verdict"].get("confidence")}
     save_catalog(cat)
-    print(json.dumps({"written": action, "skill": slug, "path": str(skill_dir),
+    print(json.dumps({"written": action, "kind": kind, "skill": slug, "path": str(skill_dir), "notes_moved": len(promoted),
                       "version": merged["version"], "sources": len(sources)}, indent=2))
+
+
+PRIVATE_SECTIONS = ("Worth trying in my context", "Worth trying", "Frames")
+
+
+def shareable(md: str) -> str:
+    """Strip what must stay local before a skill leaves the machine: apply_to_me (built from the user's profile) and
+    links to frames that are not exported."""
+    for title in PRIVATE_SECTIONS:
+        md = re.sub(rf"\n#+ {re.escape(title)}\n.*?(?=\n#+ |\Z)", "\n", md, flags=re.S)
+    return md
 
 
 def export_skills(which: str) -> list[dict]:
@@ -614,10 +709,14 @@ def export_skills(which: str) -> list[dict]:
     out = []
     for d in chosen:
         target = EXPORT_DIR / f"{d.name}.zip"
-        files = sorted(f for f in d.rglob("*") if f.is_file() and ".forge" not in f.relative_to(d).parts)
+        rel = lambda f: f.relative_to(d).parts
+        files = sorted(f for f in d.rglob("*") if f.is_file() and ".forge" not in rel(f) and "frames" not in rel(f))
         with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
             for f in files:
-                z.write(f, f.relative_to(d).as_posix())
+                if f.suffix == ".md":
+                    z.writestr(f.relative_to(d).as_posix(), shareable(f.read_text(encoding="utf-8")))
+                else:
+                    z.write(f, f.relative_to(d).as_posix())
         out.append({"skill": d.name, "zip": str(target), "files": len(files)})
     return out
 
@@ -670,7 +769,7 @@ def main() -> None:
     # skills or two notes: that is a stale solo file left next to a cluster file, and it would be forged twice.
     seen: dict = {}
     for path, d in docs:
-        kind = "skill" if (d.get("verdict") or {}).get("skill_worthy") else "note"
+        kind = verdict_kind(d)
         for src in (d.get("sources") or [d.get("source") or {}]):
             key = (src.get("url"), kind)
             if key in seen:

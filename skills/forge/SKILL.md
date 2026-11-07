@@ -57,7 +57,9 @@ Read all evidence. Build a mental model of what the source actually teaches: not
 
 Facts that only appear in the description or metadata (credits, prices in a pinned comment) go in without a timestamp; say where they came from.
 
-### 3. Judge: is this skill-worthy?
+### 3. Judge: skill, lens, or note?
+
+Three outcomes, in this order of preference when the evidence supports them: a **skill** (a procedure), a **lens** (principles to apply), or a **note** (takeaways). Set `verdict.kind`.
 
 A skill is a reusable procedure Claude can apply later. Say yes only when ALL hold:
 
@@ -68,7 +70,16 @@ A skill is a reusable procedure Claude can apply later. Say yes only when ALL ho
 - It gives Claude something it would not already do well from general knowledge: product- or version-specific menu paths and settings, non-obvious pitfalls, decisions, house conventions, concrete numbers and checks. A well-made tutorial on a generic, well-documented basic (a Python venv, an Excel dropdown, `git commit`, a basic recipe) is a note, not a skill. Exception: a well-known method that is central to the user's own work (the profile's "Core work"; topics under "Not relevant" are always notes) becomes a skill when the source turns it into a ready-to-run playbook with inputs, ordered steps and checks, because the skill then saves re-explaining it every time. Textbook knowledge of the method alone is not a reason to say no in that case.
 - The evidence actually shows the critical step. If the key moment is missing (no transcript and no frame of the code being typed, an unreadable screen), file a note that says what to re-ingest with (`--frames`, `--resolution 1280`, `--engine gemini`) instead of reconstructing the step from your own knowledge.
 
-Say no for: vlogs, news, opinion pieces, product reviews without a method, entertainment, interviews with no procedure, content too shallow to reproduce. A "no" is a good outcome; file a learning note with the real takeaways and move on. Do not inflate thin content into a skill. For pure entertainment (music, comedy, vlogs) keep the note to the verdict and a two-sentence summary; for a long interview, 10–30 timestamped claims is the useful range.
+**Lens.** When a source teaches *principles* rather than a procedure (communication, sales, negotiation, decision-making, habits, learning, personal finance, strategy), it can become a lens: a skill folder that tells Claude *when* to apply a way of thinking and *what* to apply. Say lens only when ALL hold:
+
+- The source states at least 5 distinct, actionable rules of thumb (not slogans), each one locatable at a timestamp.
+- Applying them changes what Claude would say or do for the user. If Claude would give the same advice anyway, it is a note.
+- There is a clear trigger: the user asks for X ("prepare a negotiation", "review my budget").
+- It warns about at least one concrete mistake and supports 2–3 worked micro-examples drawn from the source.
+
+Lenses merge by topic: name the slug for the topic (`communication-lens`, `sales-lens`), and a new source on that topic merges into the existing lens (`--show`). Commentary, news, entertainment and pitches stay notes even when they sound wise.
+
+Say no (note) for: vlogs, news, opinion pieces, product reviews without a method, entertainment, interviews with no procedure, content too shallow to reproduce. A "no" is a good outcome; file a learning note with the real takeaways and move on. Do not inflate thin content into a skill. For pure entertainment (music, comedy, vlogs) keep the note to the verdict and a two-sentence summary; for a long interview, 10–30 timestamped claims is the useful range.
 
 A second source on a task that so far only has a note: if together they now clear the bar, forge a skill from both; otherwise reuse the existing note's slug: the new source is appended as its own dated section.
 
@@ -76,7 +87,7 @@ Give a confidence 0.0–1.0. Below 0.5 and skill-worthy, tell the user why you a
 
 ### 4. Distill
 
-Write `distilled.json` into `work_dir` following `references/distill-schema.md`. Rules:
+Write `distilled.json` into `work_dir` following `references/distill-schema.md`. For a **lens**: `when_to_apply` (2–4 triggers phrased as user requests), 5–15 `principles` (each a rule of thumb under 40 words with a timestamp or refs), `mistakes` (what the speakers warn against, as `symptom → cause → fix` where possible), 2–3 `examples` (`situation` + how to `apply` the principles, short), and `supersedes_notes: true` when the sources were notes before. The rules below apply to skills and, where they fit, to lenses. Rules:
 
 - `slug` lowercase-hyphenated, named for the *task*, not the video (`postgres-nightly-backup`, not `great-postgres-tutorial`).
 - `description` is what triggers the skill later: lead with the task, then 2–3 phrasings a user would say.
