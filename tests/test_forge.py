@@ -563,3 +563,17 @@ def test_legacy_per_video_note_is_replaced_by_the_topic_section(tmp_path, monkey
     f.write_text(json.dumps(d))
     assert run_forge([str(f)], env).returncode == 0
     assert not legacy.exists() and (notes / "demo-task.md").is_file()
+
+
+def test_restudied_source_updates_its_confidence(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    d = distilled()
+    f.write_text(json.dumps(d))
+    assert run_forge([str(f)], env).returncode == 0
+    d["verdict"]["confidence"] = 0.62
+    d["pitfalls"].append("A sharper pitfall")
+    f.write_text(json.dumps(d))
+    assert run_forge([str(f)], env).returncode == 0
+    md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text()
+    assert "(confidence 0.62)" in md and "(confidence 0.8)" not in md

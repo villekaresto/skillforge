@@ -361,9 +361,9 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     new_source = not any(s["url"] == src["url"] for s in sources)
     if new_source:
         sources.append(src)
-    else:                                        # same source re-studied: its frame verdicts may have changed
-        sources = [{**s, "useless_frames": src["useless_frames"]} if s["url"] == src["url"] and "useless_frames" in src
-                   else s for s in sources]
+    else:                                        # same source re-studied: its confidence and frame verdicts may have changed
+        refreshed = {k: src[k] for k in ("confidence", "useless_frames") if k in src}
+        sources = [{**s, **refreshed} if s["url"] == src["url"] else s for s in sources]
     # Re-forging the same source with the same content re-renders the files but is not a new version.
     content = {k: v for k, v in d.items() if k not in ("source", "useless_frames")}   # frame verdicts belong to the source
     lost = dropped_steps(existing, content.get("procedure", []), src)
