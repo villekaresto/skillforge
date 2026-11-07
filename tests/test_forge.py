@@ -768,3 +768,27 @@ def test_music_only_captions_are_flagged():
     assert ingest.non_speech_share(music) > 0.9
     speech = [{"start": i, "end": i + 1, "text": f"step {i} open the menu"} for i in range(20)] + [{"start": 30, "end": 31, "text": "[Music]"}]
     assert ingest.non_speech_share(speech) < 0.1
+
+
+def test_tightening_rewrite_of_a_merged_skill_is_allowed_but_deletion_is_not(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(distilled()))
+    assert run_forge([str(f)], env).returncode == 0
+    second = distilled(url="https://example.com/v/def")
+    second["source"]["id"] = "def"
+    second["procedure"].append({"step": "Four, only in the second video, explained at length", "timestamp": "2:00"})
+    f.write_text(json.dumps(second))
+    assert run_forge([str(f)], env).returncode == 0          # step Four now cites ('def', '2:00')
+    stored = json.loads((tmp_path / "skills" / "demo-task" / ".forge" / "skill.json").read_text())
+    tight = {k: v for k, v in stored.items() if k not in ("sources", "forged_at", "version")}
+    tight["source"] = second["source"]
+    tight["procedure"] = [dict(st) for st in stored["procedure"]]
+    tight["procedure"][-1]["step"] = "Do four"                # reworded, citations kept
+    f.write_text(json.dumps(tight))
+    r = run_forge([str(f)], env)
+    assert r.returncode == 0, r.stderr
+    first_again = distilled()                                  # old single-source file: step Four's evidence is gone
+    f.write_text(json.dumps(first_again))
+    r = run_forge([str(f)], env)
+    assert r.returncode == 2 and "Do four" in r.stderr

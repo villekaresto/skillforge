@@ -347,17 +347,29 @@ def unknown_citations(d: dict, sources: list[dict]) -> list[str]:
     return sorted(c for c in cited - {None} if c not in known)
 
 
+def step_citations(st: dict) -> set:
+    """(source, timestamp) pairs a step cites; rewording a step keeps them, deleting it loses them."""
+    pairs = {(r.get("source"), r.get("timestamp")) for r in st.get("refs") or []}
+    if st.get("source"):
+        pairs.add((st.get("source"), st.get("timestamp")))
+    return {p for p in pairs if p[0]}
+
+
 def dropped_steps(existing: dict | None, procedure: list[dict], incoming_ids: set) -> list[str]:
-    """Stored steps that cite a source other than the incoming ones and are missing from the new procedure.
-    That is what re-forging an old single-source distilled.json over a merged skill looks like."""
+    """Stored steps backed by a source other than the incoming ones whose evidence is gone from the new procedure.
+    A step counts as kept when its text survives OR any of its (source, timestamp) citations still appears, so a
+    tightening rewrite that rewords steps passes while re-forging an old single-source distilled.json does not."""
     if not existing or len(existing.get("sources", [])) < 2:
         return []
-    kept = {st["step"] for st in procedure}
+    kept_text = {st["step"] for st in procedure}
+    kept_cites = set().union(*(step_citations(st) for st in procedure)) if procedure else set()
     lost = []
     for st in existing.get("procedure", []):
-        cited = {r.get("source") for r in st.get("refs") or []} | {st.get("source")}
-        if st["step"] not in kept and cited - {None} - incoming_ids:
-            lost.append(st["step"])
+        cites = step_citations(st)
+        others = {c for c in cites if c[0] not in incoming_ids}
+        if st["step"] in kept_text or not others or cites & kept_cites:
+            continue
+        lost.append(st["step"])
     return lost
 
 
