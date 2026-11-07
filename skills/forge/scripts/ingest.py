@@ -302,6 +302,19 @@ def dedup(ffmpeg: str, pairs: list[tuple[Path, float]], threshold: float = 3.0, 
     return kept
 
 
+def is_blank(ffmpeg: str, img: Path) -> bool:
+    """A fade-to-black or a single-colour card. Kept deliberately narrow: a dark editor with one line of code
+    (mean ~30, sd ~3) must survive, so only near-uniform or near-black frames go."""
+    r = subprocess.run([ffmpeg, "-v", "quiet", "-i", str(img), "-vf", "scale=64:36", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                       capture_output=True)
+    px = r.stdout
+    if len(px) != 64 * 36:
+        return False
+    mean = sum(px) / len(px)
+    sd = (sum((v - mean) ** 2 for v in px) / len(px)) ** 0.5
+    return sd < 1.0 or (mean < 8 and sd < 3)
+
+
 def thin_by_time(pairs: list[tuple[Path, float]], max_frames: int, duration: float | None) -> list[tuple[Path, float]]:
     """Pick at most `max_frames`, one per equal time bucket first, so a burst of cuts (memes, slides) cannot crowd out
     a long static stretch; leftover slots go to the remaining frames, evenly by index."""
@@ -355,6 +368,12 @@ def extract_frames(video: Path, out: Path, max_frames: int, duration: float | No
         run([ffmpeg, "-hide_banner", "-i", video, "-vf", f"fps=1/{step:.3f},{scale}", "-q:v", 3, frames_dir / "uniform_%04d.jpg"], timeout=1800)
         pairs += [(f, i * step) for i, f in enumerate(sorted(frames_dir.glob("uniform_*.jpg")))]
     pairs.sort(key=lambda p: p[1])
+    blank = [(f, t) for f, t in pairs if is_blank(ffmpeg, f)]
+    if blank and len(blank) < len(pairs):                 # an all-blank result means the video itself is plain
+        log(f"frames: dropped {len(blank)} blank/black frames")
+        for f, _ in blank:
+            f.unlink()
+        pairs = [p for p in pairs if p not in blank]
     if not no_dedup and pairs:
         kept = dedup(ffmpeg, pairs, max_gap=max((duration or 0) / max(max_frames, 1) * 2, 20.0))
         if len(kept) >= max(3, min(max_frames, len(pairs)) // 4):

@@ -296,9 +296,9 @@ def test_extract_frames_on_a_synthetic_video(tmp_path):
     if not shutil.which("ffmpeg"):
         __import__("pytest").skip("ffmpeg missing")
     video = tmp_path / "v.mp4"
-    # red 3 s, blue 3 s, red 3 s: two hard cuts
-    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=red:s=320x240:d=3", "-f", "lavfi", "-i",
-                    "color=blue:s=320x240:d=3", "-f", "lavfi", "-i", "color=red:s=320x240:d=3", "-filter_complex",
+    # test pattern 3 s, colour bars 3 s, test pattern 3 s: two hard cuts
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=320x240:d=3:r=25", "-f", "lavfi", "-i",
+                    "smptebars=s=320x240:d=3:r=25", "-f", "lavfi", "-i", "testsrc=s=320x240:d=3:r=25", "-filter_complex",
                     "[0][1][2]concat=n=3:v=1:a=0", str(video)], check=True)
     frames = ingest.extract_frames(video, tmp_path, max_frames=10, duration=9.0, width=320, no_dedup=False)
     assert frames and all(Path(f["path"]).is_file() for f in frames)
@@ -353,3 +353,18 @@ def test_note_renders_commands(tmp_path, monkeypatch):
     f.write_text(json.dumps(distilled(worthy=False)))
     r = run_forge([str(f), "--dry-run"], env)
     assert "ls -la" in r.stdout and "Watch out" in r.stdout
+
+
+def test_blank_frames_are_dropped_but_dark_code_frames_survive(tmp_path):
+    import shutil
+    if not shutil.which("ffmpeg"):
+        __import__("pytest").skip("ffmpeg missing")
+    ff = shutil.which("ffmpeg")
+    black, white, code = tmp_path / "black.jpg", tmp_path / "white.jpg", tmp_path / "code.jpg"
+    subprocess.run([ff, "-v", "error", "-f", "lavfi", "-i", "color=black:s=640x360", "-frames:v", "1", str(black)], check=True)
+    subprocess.run([ff, "-v", "error", "-f", "lavfi", "-i", "color=white:s=640x360", "-frames:v", "1", str(white)], check=True)
+    subprocess.run([ff, "-v", "error", "-f", "lavfi", "-i", "color=0x1e1e1e:s=640x360", "-vf",
+                    "drawbox=x=40:y=30:w=220:h=14:color=0x9cdcfe:t=fill,drawbox=x=40:y=60:w=160:h=14:color=0xce9178:t=fill",
+                    "-frames:v", "1", str(code)], check=True)
+    assert ingest.is_blank(ff, black) and ingest.is_blank(ff, white)
+    assert not ingest.is_blank(ff, code)
