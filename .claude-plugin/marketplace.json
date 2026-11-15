@@ -1,12 +1,12 @@
 {
   "name": "skillforge",
   "metadata": { "description": "Skills that learn from media. /forge turns a video or podcast into a Claude Code skill." },
-  "owner": { "name": "skillforge" },
+  "owner": { "name": "Ville Karesto" },
   "plugins": [
     {
       "name": "forge",
       "description": "Watch or listen to a video or podcast, judge whether it teaches a reusable procedure, and forge a skill from it.",
-      "author": { "name": "skillforge" },
+      "author": { "name": "Ville Karesto", "url": "https://www.villekaresto.com" },
       "source": "./",
       "category": "productivity",
       "homepage": "https://github.com/villekaresto/skillforge"

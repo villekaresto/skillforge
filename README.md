@@ -95,4 +95,4 @@ uv run --with pytest pytest -q        # or: python3 -m venv .venv && .venv/bin/p
 
 The tests need no network. They cover ingest (caption parsing and track choice, retries, cache, playlists, frame selection on synthetic video, Whisper backends), forging (merges, citations, the drop guard, idempotence, notes, lint) and playlist clustering. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
-MIT.
+MIT. Built by [Ville Karesto](https://www.villekaresto.com).
