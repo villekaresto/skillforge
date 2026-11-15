@@ -85,7 +85,7 @@ def main() -> None:
         work = root / key
         ingest.log(f"[{n + 1}/{len(chosen)}] {e['title']}")
         r = subprocess.run([sys.executable, str(Path(__file__).with_name("ingest.py")), e["url"], "--out-dir", str(work), *ingest_flags],
-                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
         try:
             summary = json.loads(r.stdout)
         except json.JSONDecodeError:
@@ -112,4 +112,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):  # Windows pipes default to cp1252; titles are any language
+        stream.reconfigure(encoding="utf-8", errors="replace")
     main()

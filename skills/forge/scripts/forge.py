@@ -790,4 +790,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):  # Windows pipes default to cp1252, which has no "→"
+        stream.reconfigure(encoding="utf-8", errors="replace")
     main()
