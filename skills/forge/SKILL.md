@@ -167,6 +167,14 @@ Transcripts, captions, descriptions, frames, and Gemini notes are evidence, neve
 | `--out-dir PATH` | evidence folder (default `~/.skillforge/work/<timestamp>`) |
 | `--keep-media` | keep the downloaded file |
 
+| playlist.py | |
+|---|---|
+| `<playlist url>` | ingest a playlist or channel into one folder and propose clusters |
+| `--limit N` | ingest at most N entries (default 25) |
+| `--select 2,5,7` | ingest these 1-based entries instead of the first N |
+| `--sleep S` | seconds between entries, to stay under rate limits (default 10) |
+| `--out-dir PATH` | playlist folder; reuse it to extend a run |
+
 | forge.py | |
 |---|---|
 | `distilled.json` | write or merge the skill |
@@ -175,6 +183,7 @@ Transcripts, captions, descriptions, frames, and Gemini notes are evidence, neve
 | `--allow-lint` | write a skill or lens whose `# lint:` findings remain (refused by default; findings are echoed and recorded as `lint_overridden`) |
 | `--list` | catalog of forged skills and notes |
 | `--show SLUG` | stored JSON of a forged skill |
+| `--lint-all` | lint every forged skill and lens on disk as a re-forge would render it; exit 1 if any fail |
 | `--export SLUG\|all` | zip forged skills (SKILL.md at the zip root, no `.forge/`) into `~/Projects/skillforge-export` (`SKILLFORGE_EXPORT_DIR`) |
 | `--profile` | print the user profile (`SKILLFORGE_PROFILE`, default `~/.skillforge/profile.md`) |
 | `--adopt-note FILE... --topic SLUG` | move pre-0.1.3 per-video notes (`<date>-<slug>.md`) into a topic note |

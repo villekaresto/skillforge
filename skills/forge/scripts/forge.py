@@ -6,6 +6,7 @@
   forge.py distilled.json --allow-lint   write anyway, echoing the lint findings
   forge.py --list                        show everything forged so far
   forge.py --show SLUG                   print a skill's stored source JSON
+  forge.py --lint-all                    lint every forged skill and lens on disk (exit 1 if any fail)
 
 Not skill-worthy? A learning note is filed under ~/.skillforge/notes instead.
 Commands found in videos are written to references/commands.md, never as executable scripts.
@@ -725,6 +726,20 @@ def shareable(md: str) -> str:
     return md
 
 
+def lint_all() -> dict:
+    """Lint every forged skill and lens as a re-forge would render it, so ones written before the gate (or with
+    --allow-lint) surface without being re-forged."""
+    stores = sorted(SKILLS_DIR.glob("*/.forge/skill.json"))
+    failing = {}
+    for store in stores:
+        stored = json.loads(store.read_text(encoding="utf-8"))
+        stored.setdefault("kind", "skill")         # skills forged before lenses existed
+        findings = lint(stored, render_skill_md(stored))
+        if findings:
+            failing[store.parent.parent.name] = findings
+    return {"checked": len(stores), "failing": failing}
+
+
 def export_skills(which: str) -> list[dict]:
     """Zip forged skills for upload elsewhere: SKILL.md at the zip root, references/ beside it, .forge/ left out."""
     import zipfile
@@ -754,6 +769,7 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--allow-drop", action="store_true", help="allow an update to remove steps that other sources back")
     ap.add_argument("--allow-lint", action="store_true", help="write a skill or lens even though lint findings remain")
+    ap.add_argument("--lint-all", action="store_true", help="lint every forged skill and lens on disk; exit 1 if any fail")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--show", metavar="SLUG")
     ap.add_argument("--adopt-note", metavar="FILE", nargs="+", help="move pre-0.1.3 per-video notes into --topic")
@@ -778,6 +794,10 @@ def main() -> None:
         for name in a.adopt_note:
             print(json.dumps(adopt_note(Path(name).expanduser(), a.topic), indent=2))
         return
+    if a.lint_all:
+        report = lint_all()
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        sys.exit(1 if report["failing"] else 0)
     if a.list:
         cat = load_catalog()
         # Note topics are the slugs to reuse when a new video is on the same subject; legacy per-video notes included.
@@ -804,6 +824,16 @@ def main() -> None:
                 die(f"{src['url']} appears as a {kind} in both {seen[key]} and {path}; a video feeds at most one skill and one "
                     f"note per run (rename the stale file, e.g. distilled.superseded.json)")
             seen[key] = path
+    # Two skill or lens files with one slug would forge the same folder twice, the second checked against a stale state.
+    # Notes are exempt: one topic slug collects a dated section per source, so several notes may share it in a run.
+    slugs: dict = {}
+    for path, d in docs:
+        if verdict_kind(d) != "note" and d.get("slug"):
+            slug = slugify(d["slug"])
+            if slug in slugs:
+                die(f"slug {slug!r} is forged by both {slugs[slug]} and {path}; merge them into one distilled file "
+                    f"(a cluster with \"sources\") or rename the stale one, e.g. distilled.superseded.json")
+            slugs[slug] = path
     for path, d in docs:                  # promoting a note while re-filing the same video as a note contradicts itself
         if d.get("supersedes_notes"):
             for src in (d.get("sources") or [d.get("source") or {}]):
