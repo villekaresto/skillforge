@@ -2,7 +2,8 @@
 """Turn a distilled JSON file (written by Claude after studying the evidence) into a Claude Code skill.
 
   forge.py distilled.json --dry-run      print the SKILL.md that would be written
-  forge.py distilled.json                write/merge the skill, update the catalog
+  forge.py distilled.json                write/merge the skill, update the catalog (refused while lint findings remain)
+  forge.py distilled.json --allow-lint   write anyway, echoing the lint findings
   forge.py --list                        show everything forged so far
   forge.py --show SLUG                   print a skill's stored source JSON
 
@@ -446,7 +447,8 @@ STAMP_IN_TEXT = re.compile(r"\(\s*(?:[A-Z][\w-]*\s+)?\d{1,2}:\d{2}(?::\d{2})?")
 
 
 def lint(d: dict, skill_md: str) -> list[str]:
-    """Tightness checks shown in the dry-run. They warn; they never block a write."""
+    """Tightness checks for a skill or lens. The dry-run prints them; a real write refuses while any remain, unless
+    --allow-lint is passed (then they are echoed to stderr and recorded as lint_overridden). Notes are not linted."""
     out = []
     body = skill_md.split("\n---\n", 1)[-1].split("\n## Sources", 1)[0]     # instructions only: no frontmatter, no Sources
     words = len(body.split())
@@ -546,14 +548,26 @@ def public(src: dict) -> dict:
     return {k: v for k, v in src.items() if not k.startswith("_")}
 
 
-def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | None = None, pending: dict | None = None) -> None:
+def lint_refusal(findings_by_file: list[tuple[str, list[str]]]) -> str:
+    lines = ["lint failed; nothing was written. Fix these (see --dry-run) or pass --allow-lint to write anyway:"]
+    for name, findings in findings_by_file:
+        lines.append(f"  {name}:")
+        lines += [f"    - {w}" for w in findings]
+    return "\n".join(lines)
+
+
+def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | None = None, pending: dict | None = None,
+          allow_lint: bool = False, check_only: bool = False, label: str = "distilled.json") -> list[str]:
     """`pending` carries note texts produced earlier in the same dry-run, so a combined dry-run shows a second note on
-    a topic as an append, exactly as the real write will."""
+    a topic as an append, exactly as the real write will. `check_only` runs every guard and returns the lint findings
+    without printing or writing, so a multi-file run can refuse before writing anything. Returns the lint findings."""
     validate(d)
     incoming = incoming_sources(d, work_dir)
     cat = load_catalog()
 
     kind = verdict_kind(d)
+    if kind == "note" and check_only:
+        return []
     if kind == "note":
         src = public(incoming[0])
         slug = slugify(d.get("slug") or re.sub(r"[^a-z0-9]+", "-", (src.get("title") or "note").lower())[:50])
@@ -571,7 +585,7 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
         if dry_run:
             verb = {"create": "would create", "update": "would update this source's section in", "append": "would append to"}[action]
             print(f"# {verb} learning note {path}\n\n{section}")
-            return
+            return []
         NOTES_DIR.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         for prev in [x for x in cat["notes"] if x.get("url") == src["url"] and Path(x["file"]) != path]:
@@ -581,7 +595,7 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
                              "reason": d["verdict"]["reason"]})
         save_catalog(cat)
         print(json.dumps({"written": "note", "action": action, "path": str(path)}, indent=2))
-        return
+        return []
 
     slug = slugify(d["slug"])
     skill_dir = SKILLS_DIR / slug
@@ -636,6 +650,9 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     # A source promoted from a note to this skill or lens leaves its note topic, but only when the file says so:
     # a long course can deliberately feed both a skill and a note.
     promoted = [x for x in cat["notes"] if d.get("supersedes_notes") and any(x.get("url") == s["url"] for s in incoming)]
+    findings = lint(merged, skill_md)
+    if check_only:
+        return findings
     if dry_run:
         verb = {"create": "would create", "update": "would update", "unchanged": "unchanged, would re-render"}[action]
         kept, omitted = sum(len(f) for _, f, _ in per_source), sum(o for _, _, o in per_source)
@@ -645,16 +662,22 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
             print(f"# warning: {len(uncited)} step(s)/principle(s) cite no source in a multi-source {kind}: {uncited[:3]}")
         for x in promoted:
             print(f"# would move {x['url']} out of note topic {Path(x['file']).stem}")
-        for w in lint(merged, skill_md):
+        for w in findings:
             print(f"# lint: {w}")
+        if findings:
+            print(f"# lint: {len(findings)} finding(s); a write will refuse without --allow-lint")
         for p in generated:
             print(f"# profile: version mismatch added as a pitfall: {p['text']}")
         if profile and not merged.get("apply_to_me"):
             print("# profile: apply_to_me is empty although a profile exists; tie the skill to the user's tools and work")
         print()
         print(skill_md)
-        return
+        return findings
 
+    if findings and not allow_lint:
+        die(lint_refusal([(label, findings)]))
+    for w in findings:
+        print(f"[forge] lint overridden (--allow-lint): {w}", file=sys.stderr)
     (skill_dir / "references").mkdir(parents=True, exist_ok=True)
     (skill_dir / ".forge").mkdir(exist_ok=True)
     (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
@@ -683,8 +706,12 @@ def forge(d: dict, dry_run: bool, allow_drop: bool = False, work_dir: Path | Non
     cat["skills"][slug] = {"name": merged["name"], "kind": kind, "path": str(skill_dir), "version": merged["version"], "updated": today(),
                            "sources": [s["url"] for s in sources], "confidence": d["verdict"].get("confidence")}
     save_catalog(cat)
-    print(json.dumps({"written": action, "kind": kind, "skill": slug, "path": str(skill_dir), "notes_moved": len(promoted),
-                      "version": merged["version"], "sources": len(sources)}, indent=2))
+    result = {"written": action, "kind": kind, "skill": slug, "path": str(skill_dir), "notes_moved": len(promoted),
+              "version": merged["version"], "sources": len(sources)}
+    if findings:
+        result["lint_overridden"] = findings
+    print(json.dumps(result, indent=2))
+    return findings
 
 
 PRIVATE_SECTIONS = ("Worth trying in my context", "Worth trying", "Frames")
@@ -726,6 +753,7 @@ def main() -> None:
     ap.add_argument("distilled", nargs="*", help="distilled JSON file(s) written by Claude; several give one combined dry-run or write")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--allow-drop", action="store_true", help="allow an update to remove steps that other sources back")
+    ap.add_argument("--allow-lint", action="store_true", help="write a skill or lens even though lint findings remain")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--show", metavar="SLUG")
     ap.add_argument("--adopt-note", metavar="FILE", nargs="+", help="move pre-0.1.3 per-video notes into --topic")
@@ -782,11 +810,17 @@ def main() -> None:
                 if (src.get("url"), "note") in seen:
                     die(f"{path} supersedes the note for {src['url']}, but {seen[(src.get('url'), 'note')]} files it as a "
                         f"note in the same run; leave the old note file out (e.g. rename it distilled.superseded.json)")
+    if not a.dry_run and not a.allow_lint:      # check every file before writing any, so a refusal never leaves half a run
+        failed = [(str(path), w) for path, d in docs
+                  if (w := forge(d, False, a.allow_drop, work_dir=path.resolve().parent, check_only=True, label=str(path)))]
+        if failed:
+            die(lint_refusal(failed))
     pending: dict = {}
     for i, (path, d) in enumerate(docs):
         if len(a.distilled) > 1:
             print(f"{chr(10) if i else ''}======== {path} ========")
-        forge(d, a.dry_run, a.allow_drop, work_dir=path.resolve().parent, pending=pending)
+        forge(d, a.dry_run, a.allow_drop, work_dir=path.resolve().parent, pending=pending, allow_lint=a.allow_lint,
+              label=str(path))
 
 
 if __name__ == "__main__":
