@@ -2,6 +2,15 @@
 
 Generated from the git history. Dates are 2026-11-07 unless noted; all work happened in one day of QA-driven iteration.
 
+## 0.5.0
+
+Dated 2026-11-22.
+
+- **Lint blocks writes.** A skill or lens with any `# lint:` finding is no longer written: `forge.py` exits 2, lists each finding per file, and writes nothing. Before, lint only printed in `--dry-run`, so an over-budget skill (1,283 words, steps over 45 words, pitfalls without `symptom → cause → fix`) could still be written. Notes are not linted.
+- `--allow-lint` writes anyway. Each finding goes to stderr and into `lint_overridden` in the JSON result, so a bypass stays visible. It is independent of `--allow-drop`.
+- A run with several distilled files lints all of them before writing any, so a refusal never leaves half a run on disk.
+- The dry-run ends its lint block with `# lint: N finding(s); a write will refuse without --allow-lint`.
+
 ## 0.4.0
 
 - **Lens**, a third verdict between skill and note, for sources that teach principles rather than a procedure. A lens forges a skill folder whose SKILL.md says when to apply it and lists 5–15 timestamped principles, the mistakes the speakers warn about, and 2–3 worked examples. Lenses merge by topic with the same citation, drop-guard and attribution rules as skills, and `supersedes_notes` moves absorbed sources out of their note topics.

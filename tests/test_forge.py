@@ -26,7 +26,8 @@ def distilled(url="https://example.com/v/abc", worthy=True):
         "summary": "A summary.",
         "procedure": [{"step": "One", "timestamp": "0:10"}, {"step": "Two", "detail": "more", "timestamp": "0:20"},
                       {"step": "Three", "timestamp": "0:30"}],
-        "pitfalls": ["Watch out"],
+        "pitfalls": ["Watch out → the demo step was skipped → run step one first"],
+        "verification": ["The output lists the new file"],
         "commands": [{"description": "list", "language": "bash", "command": "ls -la", "timestamp": "0:25"}],
         "key_claims": [{"claim": "Demos are good", "timestamp": "0:05"}],
         "apply_to_me": ["Try it"],
@@ -197,7 +198,7 @@ def test_same_source_twice_is_idempotent(tmp_path, monkeypatch):
     assert stored["version"] == 1 and len(stored["sources"]) == 1
 
     d = distilled()
-    d["pitfalls"].append("A second pitfall found on re-study")
+    d["pitfalls"].append("Re-study shows a crash → stale cache → clear it")
     f.write_text(json.dumps(d), encoding="utf-8")
     r = run_forge([str(f)], env)
     assert json.loads(r.stdout)["written"] == "update"
@@ -528,22 +529,22 @@ def test_merged_pitfalls_and_decisions_cite_their_source(tmp_path, monkeypatch):
     env = env_for(tmp_path, monkeypatch)
     f = tmp_path / "d.json"
     first = distilled()
-    first["pitfalls"] = ["Watch out for the old trap (0:15)"]
+    first["pitfalls"] = ["Old trap fires → wrong setting → reset it (0:15)"]
     first["decision_points"] = [{"when": "Small job", "then": "do it by hand"}]
     f.write_text(json.dumps(first), encoding="utf-8")
     assert run_forge([str(f)], env).returncode == 0
     md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text(encoding="utf-8")
-    assert "- Watch out for the old trap (0:15)" in md, "single-source skills render pitfalls unchanged"
+    assert "- Old trap fires → wrong setting → reset it (0:15)" in md, "single-source skills render pitfalls unchanged"
 
     second = distilled(url="https://example.com/v/def")
     second["source"]["id"] = "def"
-    second["pitfalls"] = first["pitfalls"] + ["A new trap shows up as a red banner (1:20)"]
+    second["pitfalls"] = first["pitfalls"] + ["A red banner shows up → new trap → dismiss it (1:20)"]
     second["decision_points"] = first["decision_points"] + [{"when": "Big job", "then": "use the machine", "timestamp": "2:05"}]
     f.write_text(json.dumps(second), encoding="utf-8")
     assert run_forge([str(f)], env).returncode == 0
     md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text(encoding="utf-8")
-    assert "- Watch out for the old trap. _(S1 0:15)_" in md
-    assert "- A new trap shows up as a red banner. _(S2 1:20)_" in md
+    assert "- Old trap fires → wrong setting → reset it. _(S1 0:15)_" in md
+    assert "- A red banner shows up → new trap → dismiss it. _(S2 1:20)_" in md
     assert "- **Small job** → do it by hand _(S1)_" in md and "- **Big job** → use the machine _(S2 2:05)_" in md
 
     r = run_forge([str(f)], env)                                   # idempotent with the normalised pitfalls
@@ -572,7 +573,7 @@ def test_restudied_source_updates_its_confidence(tmp_path, monkeypatch):
     f.write_text(json.dumps(d), encoding="utf-8")
     assert run_forge([str(f)], env).returncode == 0
     d["verdict"]["confidence"] = 0.62
-    d["pitfalls"].append("A sharper pitfall")
+    d["pitfalls"].append("Save is ignored → field locked → unlock it")
     f.write_text(json.dumps(d), encoding="utf-8")
     assert run_forge([str(f)], env).returncode == 0
     md = (tmp_path / "skills" / "demo-task" / "SKILL.md").read_text(encoding="utf-8")
@@ -710,6 +711,110 @@ def test_dry_run_lints_loose_skills(tmp_path, monkeypatch):
     tight["verification"] = ["The field shows the new value after saving"]
     f.write_text(json.dumps(tight), encoding="utf-8")
     assert "# lint" not in run_forge([str(f), "--dry-run"], env).stdout
+
+
+def loose_skill(url="https://example.com/v/loose", slug="loose-task"):
+    """Fails exactly the three tightness rules a real forge slipped past: word budget, step length, pitfall arrows."""
+    d = distilled(url=url)
+    d["source"]["id"] = slug
+    d["slug"] = slug
+    d["summary"] = "This summary pads the skill well past its budget. " * 100
+    d["procedure"][0]["detail"] = "and then do many more things " * 10
+    d["pitfalls"] = ["Watch out for the trigger"]
+    return d
+
+
+LOOSE_FINDINGS = ("SKILL.md is ", "step 1 is ", "pitfall does not lead with the symptom")
+
+
+def catalog_skills(tmp_path):
+    cat = tmp_path / "home" / "catalog.json"
+    return json.loads(cat.read_text(encoding="utf-8"))["skills"] if cat.is_file() else {}
+
+
+def test_write_refuses_a_skill_that_fails_lint(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(loose_skill()), encoding="utf-8")
+    r = run_forge([str(f)], env)
+    assert r.returncode == 2
+    assert all(x in r.stderr for x in LOOSE_FINDINGS), r.stderr
+    assert "--allow-lint" in r.stderr and str(f) in r.stderr
+    assert r.stdout == ""
+    assert not (tmp_path / "skills" / "loose-task").exists()
+    assert "loose-task" not in catalog_skills(tmp_path)
+
+
+def test_allow_lint_writes_anyway_and_records_the_findings(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(loose_skill()), encoding="utf-8")
+    r = run_forge([str(f), "--allow-lint"], env)
+    assert r.returncode == 0, r.stderr
+    assert (tmp_path / "skills" / "loose-task" / "SKILL.md").is_file()
+    assert "loose-task" in catalog_skills(tmp_path)
+    overridden = json.loads(r.stdout)["lint_overridden"]
+    assert len(overridden) == 3 and all(any(x in w for w in overridden) for x in LOOSE_FINDINGS)
+    assert all(f"lint overridden (--allow-lint): {w}" in r.stderr for w in overridden)
+
+
+def test_clean_write_reports_no_overrides(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(distilled()), encoding="utf-8")
+    r = run_forge([str(f)], env)
+    assert r.returncode == 0, r.stderr
+    assert "lint_overridden" not in json.loads(r.stdout) and "lint" not in r.stderr
+
+
+def test_update_that_fails_lint_leaves_the_stored_skill_untouched(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    clean = loose_skill()
+    clean.update(summary="A summary.", procedure=distilled()["procedure"], pitfalls=distilled()["pitfalls"])
+    f.write_text(json.dumps(clean), encoding="utf-8")
+    assert run_forge([str(f)], env).returncode == 0
+    skill = tmp_path / "skills" / "loose-task"
+    before = {p: p.read_bytes() for p in (skill / "SKILL.md", skill / ".forge" / "skill.json")}
+
+    f.write_text(json.dumps(loose_skill()), encoding="utf-8")
+    r = run_forge([str(f)], env)
+    assert r.returncode == 2 and all(x in r.stderr for x in LOOSE_FINDINGS)
+    assert {p: p.read_bytes() for p in before} == before
+    assert catalog_skills(tmp_path)["loose-task"]["version"] == 1
+
+
+def test_one_failing_file_stops_the_whole_run_before_any_write(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    ok, note, bad = tmp_path / "ok.json", tmp_path / "note.json", tmp_path / "bad.json"
+    ok.write_text(json.dumps(distilled(url="https://example.com/v/ok")), encoding="utf-8")
+    note.write_text(json.dumps(distilled(url="https://example.com/v/note", worthy=False)), encoding="utf-8")
+    bad.write_text(json.dumps(loose_skill()), encoding="utf-8")
+    r = run_forge([str(ok), str(note), str(bad)], env)              # the failing file comes last: nothing before it lands
+    assert r.returncode == 2
+    assert str(bad) in r.stderr and str(ok) not in r.stderr and str(note) not in r.stderr
+    assert not (tmp_path / "skills").exists()
+    assert not (tmp_path / "home" / "notes").exists()
+    assert catalog_skills(tmp_path) == {}
+
+
+def test_allow_drop_does_not_bypass_the_lint_gate(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(loose_skill()), encoding="utf-8")
+    r = run_forge([str(f), "--allow-drop"], env)
+    assert r.returncode == 2 and "--allow-lint" in r.stderr
+    assert not (tmp_path / "skills" / "loose-task").exists()
+
+
+def test_dry_run_says_a_write_would_be_refused(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(loose_skill()), encoding="utf-8")
+    r = run_forge([str(f), "--dry-run"], env)
+    assert r.returncode == 0, r.stderr
+    assert "# lint: 3 finding(s); a write will refuse without --allow-lint" in r.stdout
+    assert not (tmp_path / "skills").exists()
 
 
 def test_citations_must_name_real_sources_and_claims_go_to_their_video(tmp_path, monkeypatch):
