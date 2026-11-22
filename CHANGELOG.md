@@ -2,6 +2,15 @@
 
 Generated from the git history. Dates are 2026-11-07 unless noted; all work happened in one day of QA-driven iteration.
 
+## 0.5.1
+
+Dated 2026-11-22. Checks from the 0.5.0 retro, so its mistakes cannot recur.
+
+- `forge.py --lint-all` lints every forged skill and lens on disk as a re-forge would render it, and exits 1 if any fail. Skills written before the lint gate, or with `--allow-lint`, no longer go unnoticed.
+- Two skill or lens files with the same slug in one run are refused before anything is written. Notes are exempt: notes on one topic share a slug, one dated section per source.
+- Tests now enforce that the plugin version matches the newest CHANGELOG entry, that every flag of `forge.py`, `ingest.py` and `playlist.py` is in SKILL.md's Flags reference, and that no tracked file contains a home-directory path.
+- SKILL.md gains a `playlist.py` flags table (`--sleep` was undocumented). `CLAUDE.md` records the test command, the rules the tests enforce and the PR workflow.
+
 ## 0.5.0
 
 Dated 2026-11-22.

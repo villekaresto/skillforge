@@ -1215,3 +1215,82 @@ def test_entry_scripts_force_utf8_stdout():
         src = (ROOT / "skills" / "forge" / "scripts" / f"{name}.py").read_text(encoding="utf-8")
         main_block = src.split('if __name__ == "__main__":', 1)[1]
         assert "utf8_stdio()" in main_block or "reconfigure(" in main_block, name
+
+
+def test_lint_all_reports_only_the_skills_that_fail(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    f = tmp_path / "d.json"
+    f.write_text(json.dumps(distilled()), encoding="utf-8")
+    assert run_forge([str(f)], env).returncode == 0
+    r = run_forge(["--lint-all"], env)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {"checked": 1, "failing": {}}
+
+    f.write_text(json.dumps(loose_skill()), encoding="utf-8")
+    assert run_forge([str(f), "--allow-lint"], env).returncode == 0
+    r = run_forge(["--lint-all"], env)
+    assert r.returncode == 1
+    report = json.loads(r.stdout)
+    assert report["checked"] == 2 and list(report["failing"]) == ["loose-task"]
+    assert all(any(x in w for w in report["failing"]["loose-task"]) for x in LOOSE_FINDINGS)
+
+
+def test_two_skill_files_with_one_slug_are_refused_before_any_write(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    first, second = distilled(url="https://example.com/v/one"), distilled(url="https://example.com/v/two")
+    second["source"]["id"] = "two"
+    second["verdict"]["kind"] = "lens"          # a lens shares the skill folder namespace, so it collides too
+    a.write_text(json.dumps(first), encoding="utf-8")
+    b.write_text(json.dumps(second), encoding="utf-8")
+    r = run_forge([str(a), str(b)], env)
+    assert r.returncode == 2 and "'demo-task'" in r.stderr and str(a) in r.stderr and str(b) in r.stderr
+    assert not (tmp_path / "skills").exists()
+
+
+def test_notes_on_one_topic_still_share_a_slug_in_one_run(tmp_path, monkeypatch):
+    env = env_for(tmp_path, monkeypatch)
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    first, second = distilled(url="https://example.com/v/one", worthy=False), distilled(url="https://example.com/v/two", worthy=False)
+    second["source"]["id"] = "two"
+    a.write_text(json.dumps(first), encoding="utf-8")
+    b.write_text(json.dumps(second), encoding="utf-8")
+    r = run_forge([str(a), str(b)], env)
+    assert r.returncode == 0, r.stderr
+    notes = list((tmp_path / "home" / "notes").glob("*.md"))
+    assert [n.name for n in notes] == ["demo-task.md"]
+    text = notes[0].read_text(encoding="utf-8")
+    assert "https://example.com/v/one" in text and "https://example.com/v/two" in text
+
+
+def test_plugin_version_matches_the_newest_changelog_entry():
+    version = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    newest = next(line[3:].strip() for line in changelog.splitlines() if line.startswith("## "))
+    assert newest == version, f"plugin.json says {version}, CHANGELOG's newest entry is {newest}"
+
+
+def test_every_user_facing_flag_is_in_the_skill_flags_reference():
+    import re
+    ref = (ROOT / "skills" / "forge" / "SKILL.md").read_text(encoding="utf-8").split("## Flags reference", 1)[1]
+    missing = []
+    for name in ("forge", "ingest", "playlist"):           # the whisper helpers are only called by ingest.py
+        src = (ROOT / "skills" / "forge" / "scripts" / f"{name}.py").read_text(encoding="utf-8")
+        flags = re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', src)
+        assert flags, name
+        missing += [f"{name}.py {x}" for x in flags if not re.search(re.escape(x) + r"(?![a-z0-9-])", ref)]
+    assert not missing, f"document these in SKILL.md's Flags reference: {missing}"
+
+
+def test_no_tracked_file_contains_a_home_directory_path():
+    import re
+    home = re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/|[A-Za-z]:\\+Users\\+")
+    files = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True).stdout.decode().split("\0")
+    hits = []
+    for name in filter(None, files):
+        try:
+            text = (ROOT / name).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, FileNotFoundError):
+            continue
+        hits += [f"{name}:{i}" for i, line in enumerate(text.splitlines(), 1) if home.search(line)]
+    assert not hits, f"machine-specific home paths in tracked files (use ~ or a placeholder): {hits}"
